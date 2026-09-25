@@ -2492,17 +2492,24 @@ Number.isFinite(customer.longitude)
         customer.fatType ??
         '-'
     ).trim() || '-';
-    const fatPhotoByType = {
-        '1 pintu hitam': './resources/fat/1-pintu-hitam.jpg',
-        '1 pintu abuabu': './resources/fat/1-pintu-abu-abu.jpg',
-        '2 pintu abuabu': './resources/fat/2-pintu-abu-abu.jpg',
-        '2 pintu orange': './resources/fat/2-pintu-orange.jpg'
-    };
-    const fatPhoto = fatPhotoByType[normalizeKey(fatType)] || '';
+    const fatTypeKey = normalizeKey(fatType).replace(/\s+/g, '');
+    let fatPhotoName = '';
+    if (fatTypeKey.includes('1pintu') && fatTypeKey.includes('hitam')) {
+        fatPhotoName = '1-pintu-hitam.jpg';
+    } else if (fatTypeKey.includes('1pintu') && fatTypeKey.includes('abu')) {
+        fatPhotoName = '1-pintu-abu-abu.jpg';
+    } else if (fatTypeKey.includes('2pintu') && fatTypeKey.includes('orange')) {
+        fatPhotoName = '2-pintu-orange.jpg';
+    } else if (fatTypeKey.includes('2pintu') && fatTypeKey.includes('abu')) {
+        fatPhotoName = '2-pintu-abu-abu.jpg';
+    }
+    const fatPhoto = fatPhotoName
+        ? new URL(`resources/fat/${fatPhotoName}`, document.baseURI).href
+        : '';
     const fatPhotoHtml = fatPhoto ? `
         <div style="margin-bottom:10px; text-align:center;">
             <div style="font-weight:bold; margin-bottom:5px;">Foto FAT - ${escapeHtml(fatType)}</div>
-            <img src="${fatPhoto}" alt="Foto FAT ${escapeHtml(fatType)}"
+            <img src="${escapeHtml(fatPhoto)}" alt="Foto FAT ${escapeHtml(fatType)}"
                 onerror="this.style.display='none'; this.nextElementSibling.textContent='Foto FAT gagal dimuat.'"
                 style="display:block; width:100%; max-height:240px; object-fit:contain; border:1px solid #ddd; border-radius:5px;">
             <div style="font-size:12px;"></div>
