@@ -1,5 +1,5 @@
 # Deployment script for Azure Static Web Apps via GitHub
-# Target repo: https://github.com/fiberteamwork/mapteam.git
+# Target repo: https://github.com/fiberteamwork/FAT.git
 
 $ErrorActionPreference = "Continue"
 
@@ -16,9 +16,9 @@ if (-not (Test-Path ".git")) {
 Write-Host "`n=== Setting remote origin ==="
 $remotes = git remote
 if ($remotes -notcontains "origin") {
-    git remote add origin https://github.com/fiberteamwork/mapteam.git
+    git remote add origin https://github.com/fiberteamwork/FAT.git
 } else {
-    git remote set-url origin https://github.com/fiberteamwork/mapteam.git
+    git remote set-url origin https://github.com/fiberteamwork/FAT.git
 }
 
 Write-Host "`n=== Remote URL ==="
