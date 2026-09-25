@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Uji logika Data FAT Full</title>
+<style>
+body { font-family: monospace; padding: 12px; background: #111; color: #eee; }
+pre { white-space: pre-wrap; }
+.ok { color: #6f6; }
+.fail { color: #f66; }
+</style>
+</head>
+<body>
+<h3>Uji resolveFATHeaders + parseFATRow + filter (logika customer-map.js)</h3>
+<pre id="out">running...</pre>
+<script>
+(async function () {
+    const out = document.getElementById('out');
+    const log = [];
+    const ok = (name, cond, extra) => log.push((cond ? 'PASS ' : 'FAIL ') + name + (extra !== undefined ? ' | ' + extra : ''));
+
+    // ====== util (copy dari customer-map.js) ======
+    function normalize(value){ return String(value ?? "").replace(/^\uFEFF/, '').replace(/\u00A0/g,' ').trim().replace(/\s+/g,' '); }
+    function sanitizeNumberString(s){
+        let str = String(s ?? '').replace(/,/g, '.');
+        if (!str) return NaN;
+        str = str.replace(/[^0-9.\-]/g, '');
+        const parts = str.split('.'); if (parts.length > 2) str = parts.shift() + '.' + parts.join('');
+        if (str === '' || str === '.' || str === '-') return NaN;
+        return parseFloat(str);
+    }
+    function isWithinIndonesiaBounds(lat, lon){
+        return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -12.0 && lat <= 6.0 && lon >= 95.0 && lon <= 141.0;
+    }
+    // stub resolusi koordinat (di app asli: polygon ward dengan banyak varian kunci,
+    // termasuk versi tanpa prefix "kota/kab" — di sini didaftar eksplisit)
+    const WARD_STUB = {
+        'surabaya||rungkut||kedungsari': { latitude: -7.3123, longitude: 112.7891 },
+        'kota surabaya||rungkut||kedungsari': { latitude: -7.3123, longitude: 112.7891 }
+    };
+    function getCoordinateFromCsvWard(city, district, ward){
+        const key = [normalize(city).toLowerCase(), normalize(district).toLowerCase(), normalize(ward).toLowerCase()].join('||');
+        return WARD_STUB[key] || null;
+    }
+    function getCoordinateFromWard(city, district, ward){ return getCoordinateFromCsvWard(city, district, ward); }
+    function getCoordinateFromCity(city){
+        const n = normalize(city).toLowerCase();
+        if (n.includes('surabaya')) return { latitude: -7.257472, longitude: 112.752088 };
+        if (n.includes('sidoarjo')) return { latitude: -7.4485, longitude: 112.7152 };
+        return null;
+    }
+
+    // ====== FAT logic (copy dari customer-map.js) ======
+    const FAT_HEADER_ALIASES = {
+        id:        ["id customer", "idcustomer", "id_cust", "id", "no", "nomor", "customer id", "cust id"],
+        label:     ["label", "nama", "nama customer", "nama pelanggan", "customer", "customer name", "name", "pelanggan"],
+        city:      ["kota/kabupaten", "kota/kab", "kota kabupaten", "kota-kabupaten", "kota", "kabupaten", "kab/kota", "kab kota", "city", "kab", "kabkota"],
+        district:  ["kecamatan", "kec", "district"],
+        ward:      ["kelurahan", "desa", "kel", "ward", "village"],
+        site:      ["nama site", "namasite", "site", "site name", "nama sisi", "sisi", "lokasi site"],
+        status:    ["status", "keterangan fat", "jenis", "jenis fat", "kategori", "tipe", "fat/non fat"],
+        ket:       ["keterangan", "ket", "catatan", "note", "notes", "remark"],
+        visitDate: ["tanggal", "tgl", "tanggal visit", "tgl visit", "visit date", "tanggal fat", "tgl fat", "date"],
+        latitude:  ["latitude", "lat", "koordinat latitude", "lintang", "y"],
+        longitude: ["longitude", "lon", "long", "lng", "koordinat longitude", "bujur", "x"]
+    };
+    const __fatHeaderCache = new Map();
+    function resolveFATHeaders(rawRows) {
+        if (!Array.isArray(rawRows) || rawRows.length === 0) return {};
+        const headers = Object.keys(rawRows[0] || {});
+        const cacheKey = headers.join('\u0001');
+        if (__fatHeaderCache.has(cacheKey)) return __fatHeaderCache.get(cacheKey);
+        const normHeader = h => String(h || '').replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/[.:]$/, '');
+        const compact = s => String(s || '').toLowerCase().replace(/[^a-z0-9/]+/g, '');
+        const mapping = {};
+        for (const field of Object.keys(FAT_HEADER_ALIASES)) mapping[field] = null;
+        const used = new Set();
+        const fieldOrder = ['id', 'label', 'city', 'district', 'ward', 'site', 'status', 'ket', 'visitDate', 'latitude', 'longitude'];
+        for (const field of fieldOrder) {
+            const aliases = FAT_HEADER_ALIASES[field];
+            let found = null;
+            for (const alias of aliases) {
+                for (const h of headers) { if (used.has(h)) continue; if (normHeader(h) === alias) { found = h; break; } }
+                if (found) break;
+                for (const h of headers) { if (used.has(h)) continue; if (compact(h) === compact(alias)) { found = h; break; } }
+                if (found) break;
+            }
+            if (found) { mapping[field] = found; used.add(found); }
+        }
+        for (const field of fieldOrder) {
+            if (mapping[field]) continue;
+            const aliases = FAT_HEADER_ALIASES[field];
+            for (const alias of aliases) {
+                for (const h of headers) {
+                    if (used.has(h)) continue;
+                    if (normHeader(h).includes(alias) || alias.includes(normHeader(h))) {
+                        if (normHeader(h).length < 3) continue;
+                        mapping[field] = h; used.add(h); break;
+                    }
+                }
+                if (mapping[field]) break;
+            }
+        }
+        __fatHeaderCache.set(cacheKey, mapping);
+        return mapping;
+    }
+    function parseFATRow(row, mapping, index) {
+        const get = (field) => { const key = mapping[field]; return key ? normalize(row[key] ?? '') : ''; };
+        let lat = sanitizeNumberString(mapping.latitude ? (row[mapping.latitude] ?? '') : '');
+        let lon = sanitizeNumberString(mapping.longitude ? (row[mapping.longitude] ?? '') : '');
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            if (Math.abs(lat) > 90 && Math.abs(lon) <= 90) { const t = lat; lat = lon; lon = t; }
+            else if ((lat >= 111 && lat <= 115) && (lon <= -6 && lon >= -8)) { const t = lat; lat = lon; lon = t; }
+        }
+        if (Number.isFinite(lat) && Math.abs(lat) > 90) lat /= 1000000;
+        if (Number.isFinite(lon) && Math.abs(lon) > 180) lon /= 1000000;
+        let city = get('city'); const district = get('district'); const ward = get('ward');
+        const site = get('site'); const status = get('status'); const ket = get('ket'); const visitDate = get('visitDate');
+        let label = get('label'); let id = get('id');
+        const hasDecimals = (String(lat).split('.')[1] || '').length >= 2 && (String(lon).split('.')[1] || '').length >= 2;
+        let invalidCoord = (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) < 1e-6 || Math.abs(lon) < 1e-6 || !hasDecimals);
+        if (!invalidCoord && !isWithinIndonesiaBounds(lat, lon)) invalidCoord = true;
+        let resolvedBy = 'original';
+        if (invalidCoord) {
+            let coord = getCoordinateFromCsvWard(city, district, ward) || getCoordinateFromWard(city, district, ward);
+            if (coord) { resolvedBy = 'wardIndex'; lat = coord.latitude; lon = coord.longitude; }
+            else {
+                const cityFallback = getCoordinateFromCity(city);
+                if (cityFallback) { lat = cityFallback.latitude; lon = cityFallback.longitude; resolvedBy = 'cityFallback'; }
+                else { lat = -7.33; lon = 112.73; resolvedBy = 'default'; }
+            }
+        }
+        return { id: id || label || ('ROW' + (index + 1)), label, username: label, city, district, ward, site, team: '', vendor: '', status, ket, visitDate, latitude: lat, longitude: lon, resolvedBy };
+    }
+
+    try {
+        // ===== Kasus 1: header umum FAT =====
+        const rows1 = [
+            { "No": "1", "Label": "PT Maju Jaya", "Kota/Kabupaten": "Kab. Sidoarjo", "Kecamatan": "Candi", "Kelurahan": "Sisik", "Nama Site": "SDA-01", "Keterangan": "FAT", "Latitude": "-7.4485", "Longitude": "112.7152" },
+            { "No": "2", "Label": "Toko Berkah", "Kota/Kabupaten": "Kota Surabaya", "Kecamatan": "Rungkut", "Kelurahan": "Kedungsari", "Nama Site": "SBY-02", "Keterangan": "Non FAT", "Latitude": "0", "Longitude": "0" },
+            { "No": "3", "Label": "Warnet Zaman", "Kota/Kabupaten": "Kota Surabaya", "Kecamatan": "Rungkut", "Kelurahan": "Kedungsari", "Nama Site": "SBY-03", "Keterangan": "", "Latitude": "112.9000", "Longitude": "-7.3100" }
+        ];
+        const m1 = resolveFATHeaders(rows1);
+        ok('K1 mapping label', m1.label === 'Label', JSON.stringify(m1));
+        ok('K1 mapping city', m1.city === 'Kota/Kabupaten');
+        ok('K1 mapping site', m1.site === 'Nama Site');
+        ok('K1 mapping ket', m1.ket === 'Keterangan');
+        ok('K1 mapping id->No', m1.id === 'No');
+        const c1 = parseFATRow(rows1[0], m1, 0);
+        ok('K1 koordinat valid', c1.resolvedBy === 'original' && Math.abs(c1.latitude + 7.4485) < 1e-6, c1.latitude + ',' + c1.longitude);
+        const c2 = parseFATRow(rows1[1], m1, 1);
+        ok('K1 koordinat 0,0 -> wardIndex', c2.resolvedBy === 'wardIndex' && Math.abs(c2.latitude + 7.3123) < 1e-4, c2.resolvedBy + ' ' + c2.latitude);
+        const c3 = parseFATRow(rows1[2], m1, 2);
+        ok('K1 lat/lon tertukar -> terdeteksi invalid & snap', c3.resolvedBy === 'wardIndex', c3.resolvedBy + ' ' + c3.latitude + ',' + c3.longitude);
+        ok('K1 status keterangan', getStatusTest(c1.ket, 'FAT'));
+
+        function getStatusTest(ket, expect) { return ket === expect; }
+
+        // ===== Kasus 2: header variasi lain =====
+        const rows2 = [
+            { "Nama": "Wifi Cafe", "Kab/Kota": "Kota Surabaya", "Site": "SBY-99", "Status": "FAT", "Tanggal": "15/03/2026", "Lat": "-7.29", "Long": "112.71" }
+        ];
+        const m2 = resolveFATHeaders(rows2);
+        ok('K2 label->Nama', m2.label === 'Nama', JSON.stringify(m2));
+        ok('K2 city->Kab/Kota', m2.city === 'Kab/Kota');
+        ok('K2 site->Site', m2.site === 'Site');
+        ok('K2 status->Status', m2.status === 'Status');
+        ok('K2 visitDate->Tanggal', m2.visitDate === 'Tanggal');
+        const c4 = parseFATRow(rows2[0], m2, 0);
+        ok('K2 parse koordinat', c4.resolvedBy === 'original', c4.latitude + ',' + c4.longitude + ' ' + c4.resolvedBy);
+
+        // ===== Kasus 3: filter (city + site + keyword label) =====
+        const customers = [c1, c2, c3, c4];
+        const applyFiltersTest = (city, site, keyword) => customers.filter(c =>
+            (!city || c.city === city)
+            && (!site || c.site === site)
+            && (!keyword
+                || normalize(c.label).toLowerCase().includes(keyword)
+                || normalize(c.id).toLowerCase().includes(keyword)
+                || normalize(c.site).toLowerCase().includes(keyword))
+        );
+        ok('K3 tanpa filter = 4', applyFiltersTest('', '', '').length === 4);
+        ok('K3 filter kota Sidoarjo = 1', applyFiltersTest('Kab. Sidoarjo', '', '').length === 1);
+        ok('K3 filter site SBY-03 = 1', applyFiltersTest('', 'SBY-03', '').length === 1);
+        ok('K3 cari label "berkah" = 1', applyFiltersTest('', '', 'berkah').length === 1);
+        ok('K3 cari label "wifi" + kota surabaya = 1', applyFiltersTest('Kota Surabaya', '', 'wifi').length === 1);
+        ok('K3 kombinasi kota+site', applyFiltersTest('Kota Surabaya', 'SBY-02', '').length === 1);
+
+        // ===== Kasus 4: header tak dikenali =====
+        const m4 = resolveFATHeaders([{ "Foo": "1", "Bar": "2" }]);
+        ok('K4 header asing -> mapping kosong (fallback)', !m4.label && !m4.site && !m4.city, JSON.stringify(m4));
+
+        out.innerHTML = log.map(l => l.startsWith('PASS') ? `<span class="ok">${l}</span>` : `<span class="fail">${l}</span>`).join('\n');
+    } catch (e) {
+        out.innerHTML = '<span class="fail">ERROR: ' + (e && e.message ? e.message : e) + '</span>\n' + (e && e.stack ? e.stack : '') + '\n' + log.join('\n');
+    }
+})();
+</script>
+</body>
+</html>
