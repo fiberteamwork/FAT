@@ -2513,7 +2513,7 @@ Number.isFinite(customer.longitude)
                 onerror="this.style.display='none'; this.nextElementSibling.textContent='Foto FAT gagal dimuat.'"
                 style="display:block; width:100%; max-height:240px; object-fit:contain; border:1px solid #ddd; border-radius:5px;">
             <div style="font-size:12px;"></div>
-            <div style="margin-top:4px; font-size:11px; color:#666;"><b>Foto hanya contoh</b></div>
+            <div style="margin-top:4px; font-size:11px; color:#525252;"><small><b>*Foto hanya contoh</b></small></div>
         </div>
     ` : '';
 
