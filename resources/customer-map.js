@@ -2428,7 +2428,8 @@ Number.isFinite(customer.longitude)
     const getRawValue = header => {
         const aliases = {
             'update installation': ['update installation', 'installation date'],
-            'jumlah pelanggan baru': ['jumlah pelanggan baru']
+                'jumlah pelanggan baru': ['jumlah pelanggan baru'],
+                'project site': ['project site']
         };
         const keys = aliases[normalizeKey(header)] || [normalizeKey(header)];
         const key = Object.keys(rawFatData).find(item => keys.includes(normalizeKey(item)));
@@ -2441,7 +2442,8 @@ Number.isFinite(customer.longitude)
     const additionalDetails = [
         { label: 'Survey Date', field: 'Survey Date' },
         { label: 'Update Installation', field: 'Update Installation' },
-        { label: 'Jumlah Pelanggan Baru', field: 'Jumlah Pelanggan Baru' }
+        { label: 'Jumlah Pelanggan Baru', field: 'Jumlah Pelanggan Baru' },
+        { label: 'Project Site', field: 'Project Site' }
     ];
     const additionalRows = additionalDetails.map(({ label, field }) => `
                 <tr>
@@ -3925,7 +3927,7 @@ async function loadXlsxArrayBuffer(url) {
     }
     let lastError = null;
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, { cache: 'no-cache' });
         if (!response.ok) {
             throw new Error('Data gagal dibaca. HTTP ' + response.status);
         }
@@ -3966,18 +3968,6 @@ async function xlsxRowsFromBuffer(buf) {
         return XLSXLite.sheetToObjects(rows);
     }
     throw new Error('Parser XLSX (resources/xlsx-lite.js) tidak termuat.');
-}
-
-// Serialisasi ulang row objects -> teks CSV ';' agar kompatibel dengan alur parsing/filtering yang ada
-function rowsToCsvText(rows) {
-    if (!Array.isArray(rows) || rows.length === 0) return '';
-    const headers = Object.keys(rows[0] || {});
-    const esc = v => String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/;/g, ',');
-    const lines = [headers.map(h => esc(h)).join(';')];
-    for (const r of rows) {
-        lines.push(headers.map(h => esc(r[h])).join(';'));
-    }
-    return lines.join('\n');
 }
 
 function deduplicateCustomerMarkers(items) {
@@ -4029,6 +4019,9 @@ async function loadData(input = null) {
  
         // Ensure polygon layers are ready so ward index is accurate
         await waitForLayersReady(5000, 5);
+        const xlsxBufferPromise = input === null
+            ? loadXlsxArrayBuffer(DATA_URL)
+            : null;
         try { buildWardIndex(); } catch(e){ console.warn('buildWardIndex failed (pre-fetch)', e); }
         try { buildWardPolygonIndex(); } catch(e){ console.warn('buildWardPolygonIndex failed (pre-fetch)', e); }
  
@@ -4038,7 +4031,7 @@ async function loadData(input = null) {
         // Sumber data: data/Data FAT Full.xlsx (default), atau upload CSV/XLSX, atau array rows
         let rows;
         if (input === null) {
-            const buf = await loadXlsxArrayBuffer(DATA_URL + "?v=" + Date.now());
+            const buf = await xlsxBufferPromise;
             rows = await xlsxRowsFromBuffer(buf);
         } else if (Array.isArray(input)) {
             rows = input;
@@ -4047,7 +4040,6 @@ async function loadData(input = null) {
         } else {
             rows = parseCSV(String(input));
         }
-        const text = rowsToCsvText(rows);
  
         console.log('[CUSTOMER_MAP] loadData start, rows=', rows.length);
         // Faster initial render: show a small immediate subset while full CSV is parsed in the background
@@ -4140,20 +4132,6 @@ async function startCustomerMap() {
 
     // Remove controls left by an older cached script version.
     document.querySelectorAll('#marker-edit-toggle, #marker-edit-floating, #popup-edit-controls').forEach(element => element.remove());
- 
-    // Wait a short while for polygon layers to populate features (helps ward lookup)
-    await waitForLayersReady(3000, 5);
- 
-    try {
-        buildWardIndex();
-    } catch (e) {
-        console.warn('buildWardIndex failed during start', e);
-    }
-    try {
-        buildWardPolygonIndex();
-    } catch (e) {
-        console.warn('buildWardPolygonIndex failed during start', e);
-    }
  
     // Geolocate control (device GPS)
     try { setupGeolocateControl(); } catch (e) { console.warn('setupGeolocateControl failed', e); }
