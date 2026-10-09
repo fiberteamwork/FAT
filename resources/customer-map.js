@@ -89,8 +89,11 @@ const STATUS_CONFIG = {
 };
 
 const PORT_STATUS_CONFIG = {
-    full: { label: "Full", color: "#ef4444" },
-    available: { label: "Available", color: "#3b82f6" },
+    full: { label: "Port Full", color: "#ef4444" },
+    available: { label: "Available", color: "#22c55e" },
+    noData: { label: "Belum Ada Data", color: "#8b5e3c" },
+    needCheck: { label: "Need Check", color: "#f97316" },
+    unavailable: { label: "UnAvailable", color: "#111827" },
     partial: { label: "Partial", color: "#f59e0b" },
     unknown: { label: "Tidak diketahui", color: "#6b7280" }
 };
@@ -99,12 +102,16 @@ const PORT_STATUS_FILTER_KEYS = ["full", "available"];
 
 function getPortStatusKey(customer) {
     const explicit = String(
+        customer?.dataFatFull?.["Status FAT"] ??
         customer?.dataFatFull?.["Status Port"] ??
         customer?.statusPort ??
         customer?.status ??
         ""
     ).trim().toLowerCase();
 
+    if (explicit.includes("unavailable")) return "unavailable";
+    if (explicit.includes("belum ada data") || explicit.includes("no data")) return "noData";
+    if (explicit.includes("need check") || explicit.includes("perlu pengecekan")) return "needCheck";
     if (explicit.includes("full") || explicit.includes("penuh")) return "full";
     if (explicit.includes("avaible") || explicit.includes("available") || explicit.includes("idle")) return "available";
 
@@ -334,15 +341,15 @@ function parseCSV(text) {
 // ==============================
 const FAT_HEADER_ALIASES = {
     id:        ["id customer", "idcustomer", "id_cust", "id", "no", "nomor", "customer id", "cust id"],
-    label:     ["label", "nama", "nama customer", "nama pelanggan", "customer", "customer name", "name", "pelanggan"],
+    label:     ["label fat new", "label fat old", "label", "nama", "nama customer", "nama pelanggan", "customer", "customer name", "name", "pelanggan"],
     siteId:    ["site id", "siteid", "site_id"],
     city:      ["kota/kabupaten", "kota/kab", "kota kabupaten", "kota-kabupaten", "kota", "kabupaten", "kab/kota", "kab kota", "city", "kab", "kabkota"],
     district:  ["kecamatan", "kec", "district"],
     ward:      ["kelurahan", "desa", "kel", "ward", "village"],
     site:      ["nama site", "namasite", "site", "site name", "nama sisi", "sisi", "lokasi site"],
-    status:    ["status", "keterangan fat", "jenis", "jenis fat", "kategori", "tipe", "fat/non fat"],
+    status:    ["status fat", "status", "keterangan fat", "jenis", "jenis fat", "kategori", "tipe", "fat/non fat"],
     ket:       ["keterangan", "ket", "catatan", "note", "notes", "remark"],
-    visitDate: ["tanggal", "tgl", "tanggal visit", "tgl visit", "visit date", "tanggal fat", "tgl fat", "date"],
+    visitDate: ["update fat", "tanggal", "tgl", "tanggal visit", "tgl visit", "visit date", "tanggal fat", "tgl fat", "survey date", "date"],
     latitude:  ["latitude", "lat", "koordinat latitude", "lintang", "y"],
     longitude: ["longitude", "lon", "long", "lng", "koordinat longitude", "bujur", "x"],
     userLatitude: ["user latitude"],
@@ -2425,14 +2432,26 @@ Number.isFinite(customer.longitude)
     const rawFatData = customer.dataFatFull && typeof customer.dataFatFull === 'object'
         ? customer.dataFatFull
         : {};
+    const rawFieldAliases = {
+        'survey date': ['survey date', 'update fat'],
+        'update fat': ['update fat', 'survey date', 'tanggal fat', 'tanggal'],
+        'update installation': ['update installation', 'installation date'],
+        'jumlah pelanggan baru': ['jumlah pelanggan baru'],
+        'project site': ['project site'],
+        'total used (visual)': ['total used (visual)', 'total used visual', 'total used'],
+        'total idle (visual)': ['total idle (visual)', 'total idle visual', 'total idle'],
+        'status port': ['status port', 'status fat', 'status'],
+        'status fat': ['status fat', 'status port', 'status'],
+        'province': ['province', 'provinsi'],
+        'ioh business area': ['ioh business area', 'business area']
+    };
+    const findRawKey = header => {
+        const normalizedHeader = normalizeKey(header);
+        const keys = rawFieldAliases[normalizedHeader] || [normalizedHeader];
+        return Object.keys(rawFatData).find(item => keys.includes(normalizeKey(item)));
+    };
     const getRawValue = header => {
-        const aliases = {
-            'update installation': ['update installation', 'installation date'],
-                'jumlah pelanggan baru': ['jumlah pelanggan baru'],
-                'project site': ['project site']
-        };
-        const keys = aliases[normalizeKey(header)] || [normalizeKey(header)];
-        const key = Object.keys(rawFatData).find(item => keys.includes(normalizeKey(item)));
+        const key = findRawKey(header);
         return key ? rawFatData[key] : '';
     };
     const displayValue = value => {
@@ -2440,11 +2459,14 @@ Number.isFinite(customer.longitude)
         return text ? escapeHtml(text) : '-';
     };
     const additionalDetails = [
-        { label: 'Survey Date', field: 'Survey Date' },
+        { label: 'Label FAT OLD', field: 'Label FAT OLD' },
+        { label: 'PROVINCE', field: 'PROVINCE' },
+        { label: 'IOH BUSINESS AREA', field: 'IOH BUSINESS AREA' },
+        { label: 'Update FAT', field: 'Update FAT' },
         { label: 'Update Installation', field: 'Update Installation' },
         { label: 'Jumlah Pelanggan Baru', field: 'Jumlah Pelanggan Baru' },
         { label: 'Project Site', field: 'Project Site' }
-    ];
+    ].filter(({ field }) => findRawKey(field));
     const additionalRows = additionalDetails.map(({ label, field }) => `
                 <tr>
                     <td>${escapeHtml(label)}</td>
@@ -2452,11 +2474,10 @@ Number.isFinite(customer.longitude)
                 </tr>
     `).join('');
     const detailFields = [
-        'Jumlah Splitter',
         'Total Port',
-        'Total Used (Visual)',
-        'Total Idle (Visual)',
-        'Status Port'
+        'Total Used',
+        'Total Idle',
+        'Status FAT'
     ];
     const siteId = customer.siteId || getRawValue('Site ID');
     const detailHeaders = detailFields.map(header =>
@@ -3070,30 +3091,16 @@ function updateSummary(data) {
    ========================================================= */
 
 function updateChart(data) {
-    const grouped = new Map();
-    data.forEach(c => {
-        const status = String(
-            c.dataFatFull?.['Status Port'] ||
-            (getPortStatusKey(c) !== 'unknown' ? PORT_STATUS_CONFIG[getPortStatusKey(c)].label : '')
-        )
-            .replace(/\s+/g, ' ')
-            .trim();
-        if (!status) return;
-        if (!grouped.has(status)) grouped.set(status, { used: 0, idle: 0 });
-        const item = grouped.get(status);
-        const sumPortValues = value => {
-            const values = String(value ?? '').match(/-?\d+(?:[.,]\d+)?/g);
-            return values ? values.reduce((sum, part) => sum + (Number(part.replace(',', '.')) || 0), 0) : 0;
-        };
-        item.used += sumPortValues(c.dataFatFull?.['Total Used (Visual)'] ?? c.totalUsedVisual);
-        item.idle += sumPortValues(c.dataFatFull?.['Total Idle (Visual)'] ?? c.totalIdleVisual);
+    const statusCounts = new Map();
+    data.forEach(customer => {
+        const key = getPortStatusKey(customer);
+        statusCounts.set(key, (statusCounts.get(key) || 0) + 1);
     });
-
-    const labels = [...grouped.keys()];
-    const usedValues = labels.map(label => grouped.get(label).used);
-    const idleValues = labels.map(label => grouped.get(label).idle);
-
-
+    const statusKeys = Object.keys(PORT_STATUS_CONFIG)
+        .filter(key => statusCounts.has(key));
+    const labels = statusKeys.map(key => PORT_STATUS_CONFIG[key].label);
+    const counts = statusKeys.map(key => statusCounts.get(key));
+    const colors = statusKeys.map(key => PORT_STATUS_CONFIG[key].color);
     const canvas =
         document.getElementById(
             "ward-chart"
@@ -3109,20 +3116,17 @@ function updateChart(data) {
             canvas,
             {
 
-                type: "bar",
+                type: "doughnut",
 
                 data: {
                     labels,
                     datasets: [
                         {
-                            label: 'Total Used (Visual)',
-                            data: usedValues,
-                            backgroundColor: '#ef4444'
-                        },
-                        {
-                            label: 'Total Idle (Visual)',
-                            data: idleValues,
-                            backgroundColor: '#22c55e'
+                            label: 'Jumlah FAT',
+                            data: counts,
+                            backgroundColor: colors,
+                            borderColor: '#ffffff',
+                            borderWidth: 2
                         }
                     ]
                 },
@@ -3133,30 +3137,18 @@ function updateChart(data) {
                     layout: {
                         padding: { top: 8, right: 8, bottom: 12, left: 8 }
                     },
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Status Port',
-                                color: '#111827',
-                                font: { weight: 'bold' }
-                            },
-                            ticks: {
-                                autoSkip: false,
-                                maxRotation: 0,
-                                minRotation: 0,
-                                callback: function(value) {
-                                    const label = this.getLabelForValue(value);
-                                    return String(label).split(' ');
-                                }
-                            }
-                        },
-                        y: { beginAtZero: true, title: { display: true, text: 'Jumlah Port' } }
-                    },
                     plugins: {
                         legend: {
-                            position:
-                                "bottom"
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: context => {
+                                    const total = counts.reduce((sum, count) => sum + count, 0);
+                                    const percentage = total ? (context.raw / total * 100).toFixed(1) : '0.0';
+                                    return `${context.label}: ${context.raw} (${percentage}%)`;
+                                }
+                            }
                         }
                     }
                 }
@@ -3165,10 +3157,12 @@ function updateChart(data) {
 
     const legend = document.getElementById('legend');
     if (legend) {
-        legend.innerHTML = `
-            <div class="legend-item"><span class="legend-color" style="background:#ef4444"></span><span>Total Used (Visual): ${usedValues.reduce((a, b) => a + b, 0)}</span></div>
-            <div class="legend-item"><span class="legend-color" style="background:#22c55e"></span><span>Total Idle (Visual): ${idleValues.reduce((a, b) => a + b, 0)}</span></div>
-        `;
+        legend.innerHTML = statusKeys.map((key, index) => `
+            <div class="legend-item">
+                <span class="legend-color" style="background:${colors[index]}"></span>
+                <span>${escapeHtml(labels[index])}: ${counts[index]}</span>
+            </div>
+        `).join('');
     }
 
 }
