@@ -91,6 +91,68 @@
     box-sizing: border-box;
 }
 
+.site-dropdown {
+    position: relative;
+}
+
+.site-dropdown-toggle {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: white;
+    box-sizing: border-box;
+    text-align: left;
+    cursor: pointer;
+}
+
+.site-dropdown-panel {
+    position: absolute;
+    z-index: 10001;
+    top: calc(100% + 3px);
+    left: 0;
+    right: 0;
+    padding: 8px;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.18);
+}
+
+.site-dropdown-panel[hidden] {
+    display: none;
+}
+
+#filter-site-search {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+
+.site-dropdown-options {
+    max-height: 220px;
+    overflow-y: auto;
+    margin-top: 6px;
+}
+
+.site-dropdown-option {
+    display: block;
+    width: 100%;
+    padding: 8px;
+    border: 0;
+    border-radius: 4px;
+    background: white;
+    text-align: left;
+    cursor: pointer;
+}
+
+.site-dropdown-option:hover,
+.site-dropdown-option:focus {
+    background: #eff6ff;
+}
+
 #summary {
     display: flex;
     gap: 8px;
@@ -234,7 +296,7 @@
         <input
             type="text"
             id="search-label"
-            placeholder="Cari FAT/ODP/Lokasi Site..."
+            placeholder="Cari FAT OLD / FAT NEW?"
             style="
                 width:100%;
                 padding:8px;
@@ -250,7 +312,14 @@
         </select>
 
         <label>Nama Site</label>
-        <select id="filter-site">
+        <div class="site-dropdown" id="site-dropdown">
+            <button type="button" id="filter-site-toggle" class="site-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false">Semua Nama Site</button>
+            <div id="filter-site-panel" class="site-dropdown-panel" hidden>
+                <input type="text" id="filter-site-search" placeholder="Cari nama site..." role="combobox" aria-controls="filter-site-options" aria-expanded="true" autocomplete="off">
+                <div id="filter-site-options" class="site-dropdown-options" role="listbox" aria-label="Pilihan nama site"></div>
+            </div>
+        </div>
+        <select id="filter-site" hidden>
             <option value="">Semua Nama Site</option>
         </select>
 
@@ -345,7 +414,7 @@
         <script src="./layers/layers.js" type="text/javascript"></script> 
         <script src="./resources/Autolinker.min.js"></script>
         <script src="./resources/qgis2web.js"></script>        
-        <script src="./resources/customer-map.js?v=20261009.4"></script>
+        <script src="./resources/customer-map.js?v=20261010.3"></script>
         
     </body>
 </html>
