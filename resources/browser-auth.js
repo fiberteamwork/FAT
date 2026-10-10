@@ -205,7 +205,7 @@
     function loginAccount(account) {
         activeAccount = { username: account.username, role: account.role };
         sessionStorage.setItem(SESSION_KEY, account.usernameKey);
-        byId('auth-session-label').textContent = `${activeAccount.username} (${activeAccount.role === 'admin' ? 'Admin' : 'User'})`;
+        byId('auth-session-label').textContent = `${activeAccount.username} ${activeAccount.role === 'admin' ? 'Admin' : 'User'}`;
         byId('auth-manage-users').hidden = activeAccount.role !== 'admin';
         byId('auth-gate').hidden = true;
         document.body.classList.add('auth-ready');
