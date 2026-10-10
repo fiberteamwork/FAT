@@ -89,16 +89,16 @@ const STATUS_CONFIG = {
 };
 
 const PORT_STATUS_CONFIG = {
-    full: { label: "Port Full", color: "#ef4444" },
-    available: { label: "Available", color: "#22c55e" },
-    noData: { label: "Belum Ada Data", color: "#8b5e3c" },
-    needCheck: { label: "Need Check", color: "#f97316" },
-    unavailable: { label: "UnAvailable", color: "#111827" },
-    partial: { label: "Partial", color: "#f59e0b" },
-    unknown: { label: "Tidak diketahui", color: "#6b7280" }
+    full: { label: "Port Full🔴", color: "#ef4444" },
+    available: { label: "Available🟢", color: "#22c55e" },
+    noData: { label: "Belum Ada Data🟤", color: "#8b5e3c" },
+    needCheck: { label: "Need Check🟠", color: "#f97316" },
+    unavailable: { label: "UnAvailable⚫", color: "#111827" },
+    partial: { label: "Partial🟡", color: "#f59e0b" },
+    unknown: { label: "Tidak diketahui⚪", color: "#f9fafd" }
 };
 
-const PORT_STATUS_FILTER_KEYS = ["full", "available"];
+const PORT_STATUS_FILTER_KEYS = ["full", "available", "noData", "needCheck", "unavailable"];
 
 function getPortStatusKey(customer) {
     const explicit = String(
@@ -2929,6 +2929,47 @@ function fillSelect(
 
 }
 
+function renderSiteDropdown(values, selectedValue) {
+    const toggle = document.getElementById("filter-site-toggle");
+    const options = document.getElementById("filter-site-options");
+    const search = document.getElementById("filter-site-search");
+    if (!toggle || !options || !search) return;
+
+    toggle.textContent = selectedValue || "Semua Nama Site";
+    const query = normalize(search.value).toLowerCase();
+    const matchingValues = values.filter(value => normalize(value).toLowerCase().includes(query));
+    const optionValues = ["", ...matchingValues];
+
+    options.replaceChildren();
+    optionValues.forEach(value => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "site-dropdown-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(value === selectedValue));
+        option.textContent = value || "Semua Nama Site";
+        option.addEventListener("click", () => {
+            const select = document.getElementById("filter-site");
+            if (select) select.value = value;
+            toggle.textContent = value || "Semua Nama Site";
+            document.getElementById("filter-site-panel").hidden = true;
+            toggle.setAttribute("aria-expanded", "false");
+            search.value = "";
+            renderSiteDropdown(values, value);
+            applyFilters();
+            toggle.focus();
+        });
+        options.appendChild(option);
+    });
+
+    if (matchingValues.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "site-dropdown-option";
+        empty.textContent = "Nama site tidak ditemukan";
+        options.appendChild(empty);
+    }
+}
+
 
 /* =========================================================
    FILTER OPTIONS
@@ -2976,12 +3017,6 @@ function updateFilters() {
     const siteValues =
         uniqueValues(siteData, "site");
 
-    fillSelect(
-        "filter-site",
-        siteValues,
-        "Semua Nama Site"
-    );
-
     if (
         selectedSite &&
         siteValues.includes(selectedSite)
@@ -2990,6 +3025,7 @@ function updateFilters() {
             "filter-site"
         ).value = selectedSite;
     }
+    renderSiteDropdown(siteValues, selectedSite && siteValues.includes(selectedSite) ? selectedSite : "");
 
     const portStatusSelect = document.getElementById("filter-port-status");
     if (portStatusSelect) {
@@ -3238,10 +3274,56 @@ if (setupFilters._isInitialized) return;
 setupFilters._isInitialized = true;
  
 const search = document.getElementById("search-label");
+const siteDropdownToggle = document.getElementById("filter-site-toggle");
+const siteDropdownPanel = document.getElementById("filter-site-panel");
+const siteDropdownSearch = document.getElementById("filter-site-search");
  
 if (search) {
     search.addEventListener("input", function () {
         applyFilters();
+    });
+}
+
+if (siteDropdownToggle && siteDropdownPanel && siteDropdownSearch) {
+    siteDropdownToggle.addEventListener("click", () => {
+        const open = siteDropdownPanel.hidden;
+        siteDropdownPanel.hidden = !open;
+        siteDropdownToggle.setAttribute("aria-expanded", String(open));
+        if (open) {
+            siteDropdownSearch.value = "";
+            const siteSelect = document.getElementById("filter-site");
+            const citySelect = document.getElementById("filter-city");
+            const city = citySelect?.value || "";
+            const sites = uniqueValues(
+                city ? customers.filter(customer => customer.city === city) : customers,
+                "site"
+            );
+            renderSiteDropdown(sites, siteSelect?.value || "");
+            siteDropdownSearch.focus();
+        }
+    });
+    siteDropdownSearch.addEventListener("input", () => {
+        const siteSelect = document.getElementById("filter-site");
+        const city = document.getElementById("filter-city")?.value || "";
+        const sites = uniqueValues(
+            city ? customers.filter(customer => customer.city === city) : customers,
+            "site"
+        );
+        renderSiteDropdown(sites, siteSelect?.value || "");
+    });
+    document.addEventListener("click", event => {
+        const dropdown = document.getElementById("site-dropdown");
+        if (dropdown && !dropdown.contains(event.target)) {
+            siteDropdownPanel.hidden = true;
+            siteDropdownToggle.setAttribute("aria-expanded", "false");
+        }
+    });
+    siteDropdownSearch.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            siteDropdownPanel.hidden = true;
+            siteDropdownToggle.setAttribute("aria-expanded", "false");
+            siteDropdownToggle.focus();
+        }
     });
 }
  
