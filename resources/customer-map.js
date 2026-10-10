@@ -3288,12 +3288,16 @@ function applyFilters() {
 
     const filtered = customers.filter(c => {
         const cPortStatus = getPortStatusKey(c);
+        const labelFatOld = normalize(c.dataFatFull?.["Label FAT OLD"]).toLowerCase();
+        const labelFatNew = normalize(c.dataFatFull?.["Label FAT NEW"]).toLowerCase();
         return (
             (!city || c.city === city)
             && (!site || c.site === site)
             && (!portStatus || cPortStatus === portStatus)
             && (!keyword
                 || normalize(c.label).toLowerCase().includes(keyword)
+                || labelFatOld.includes(keyword)
+                || labelFatNew.includes(keyword)
                 || normalize(c.id).toLowerCase().includes(keyword)
                 || normalize(c.site).toLowerCase().includes(keyword))
         );
