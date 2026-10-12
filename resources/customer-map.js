@@ -4405,43 +4405,58 @@ function deduplicateCustomerMarkers(items) {
    ========================================================= */
 
 async function loadData(input = null) {
- 
+
+    const loadingMessage = document.getElementById('map-loading-message');
+    const loadingStatus = document.getElementById('map-loading');
+    const showLoadingMessage = async message => {
+        if (loadingMessage) loadingMessage.textContent = message;
+        if (loadingStatus) loadingStatus.hidden = false;
+        await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    };
+
     try {
- 
-        // Ensure polygon layers are ready so ward index is accurate
-        await waitForLayersReady(5000, 5);
+
         const xlsxBufferPromise = input === null
             ? (window.customerDataPreload
                 ? window.customerDataPreload.then(buffer => buffer || loadXlsxArrayBuffer(DATA_URL))
                 : loadXlsxArrayBuffer(DATA_URL))
             : null;
+
+        // Ensure polygon layers are ready so ward index is accurate
+        await showLoadingMessage('Menyiapkan batas wilayah peta...');
+        await waitForLayersReady(5000, 5);
+
+        await showLoadingMessage('Menyiapkan indeks wilayah...');
         try { buildWardIndex(); } catch(e){ console.warn('buildWardIndex failed (pre-fetch)', e); }
         try { buildWardPolygonIndex(); } catch(e){ console.warn('buildWardPolygonIndex failed (pre-fetch)', e); }
         try { buildCityBoundaryIndex(); } catch(e){ console.warn('buildCityBoundaryIndex failed (pre-fetch)', e); }
- 
+
         // Remove any stale customer layers before loading fresh data
         try { removeStaleCustomerLayers(); } catch(e) { }
- 
+
         // Sumber data: data/Data FAT Full.xlsx (default), atau upload CSV/XLSX, atau array rows
         let rows;
         if (input === null) {
+            await showLoadingMessage('Membaca file FAT...');
             const buf = await xlsxBufferPromise;
             rows = await xlsxRowsFromBuffer(buf);
         } else if (Array.isArray(input)) {
             rows = input;
         } else if (typeof ArrayBuffer !== 'undefined' && input instanceof ArrayBuffer) {
+            await showLoadingMessage('Membaca file FAT...');
             rows = await xlsxRowsFromBuffer(input);
         } else {
+            await showLoadingMessage('Membaca file FAT...');
             rows = parseCSV(String(input));
         }
- 
+
         console.log('[CUSTOMER_MAP] loadData start, rows=', rows.length);
         // Faster initial render: show a small immediate subset while full CSV is parsed in the background
         const t0 = performance.now();
 
         // Parse seluruh rows secara chunked (tanpa preview; dataset XLSX sudah cepat diparse)
         const isMobile = window.matchMedia('(max-width: 768px)').matches;
-        const loadingMessage = document.getElementById('map-loading-message');
+        await showLoadingMessage('Memproses data FAT... 0%');
         customers = await parseCustomerDataAsync(rows, {
             chunkSize: isMobile ? 250 : 1000,
             onProgress: (processed, total) => {
@@ -4454,6 +4469,7 @@ async function loadData(input = null) {
         const t1 = performance.now();
         console.log('[CUSTOMER_MAP] loadData parsed customers count=', customers.length, 'parseMs=', Math.round(t1 - t0));
         siteValuesCache.clear();
+        await showLoadingMessage('Menyiapkan tampilan peta...');
         customers = deduplicateCustomerMarkers(customers);
 
         if (customers.length === 0) {
@@ -4475,7 +4491,6 @@ async function loadData(input = null) {
         updateSummary(customers);
         updateChart(customers);
         window.customerMapReady = true;
-        const loadingStatus = document.getElementById('map-loading');
         if (loadingStatus) loadingStatus.hidden = true;
 
     }

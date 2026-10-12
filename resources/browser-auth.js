@@ -34,11 +34,11 @@
             'resources/Autolinker.min.js',
             'resources/qgis2web.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'resources/customer-map.js?v=20261012.14'
+            'resources/customer-map.js?v=20261012.16'
         ];
 
         const loadingMessage = byId('map-loading-message');
-        if (loadingMessage) loadingMessage.textContent = 'Menyiapkan peta dan data FAT...';
+        if (loadingMessage) loadingMessage.textContent = 'Memuat komponen peta...';
         window.customerDataPreload = fetch('./data/Data FAT Full.xlsx?v=20261012.1', {
             cache: 'force-cache'
         }).then(response => {
