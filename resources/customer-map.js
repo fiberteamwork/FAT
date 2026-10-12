@@ -26,6 +26,7 @@ let customerExpandedSource = null;
 let activeMapCustomers = [];
 let activeMapDrawOptions = {};
 let mapViewportRenderTimer = null;
+let filterApplyTimer = null;
 let wardChart = null;
 let customerDrawVersion = 0;
 let customerDrawTimeout = null;
@@ -687,7 +688,7 @@ function parseFATRow(row, mapping, index) {
         totalPort: Number.isFinite(totalPort) ? totalPort : undefined,
         totalUsedVisual: Number.isFinite(totalUsedVisual) ? totalUsedVisual : undefined,
         totalIdleVisual: Number.isFinite(totalIdleVisual) ? totalIdleVisual : undefined,
-        dataFatFull: Object.assign({}, row),
+        dataFatFull: row,
         resolvedBy
     };
 }
@@ -1877,6 +1878,7 @@ function parseCustomerDataAsync(text, options = {}) {
                 }
 
                 if (i < N) {
+                    if (typeof options.onProgress === 'function') options.onProgress(i, N);
                     // yield to event loop
                     setTimeout(processChunk, 0);
                 } else {
@@ -1887,6 +1889,7 @@ function parseCustomerDataAsync(text, options = {}) {
                         'defaulted=', defaultedCount,
                         'setupMs=', setupMs,
                         'rowParseMs=', Math.round(performance.now() - setupStart - setupMs));
+                    if (typeof options.onProgress === 'function') options.onProgress(N, N);
                     resolve(customers);
                 }
             };
@@ -3593,7 +3596,11 @@ const siteDropdownSearch = document.getElementById("filter-site-search");
  
 if (search) {
     search.addEventListener("input", function () {
-        applyFilters();
+        if (filterApplyTimer !== null) clearTimeout(filterApplyTimer);
+        filterApplyTimer = setTimeout(() => {
+            filterApplyTimer = null;
+            applyFilters();
+        }, 180);
     });
 }
 
@@ -4369,7 +4376,7 @@ function deduplicateCustomerMarkers(items) {
         if (existing) {
             duplicateCount++;
             const existingData = existing.dataFatFull && typeof existing.dataFatFull === 'object'
-                ? existing.dataFatFull
+                ? { ...existing.dataFatFull }
                 : {};
             const incomingData = item.dataFatFull && typeof item.dataFatFull === 'object'
                 ? item.dataFatFull
@@ -4433,7 +4440,17 @@ async function loadData(input = null) {
         const t0 = performance.now();
 
         // Parse seluruh rows secara chunked (tanpa preview; dataset XLSX sudah cepat diparse)
-        customers = await parseCustomerDataAsync(rows, { chunkSize: 1000 });
+        const isMobile = window.matchMedia('(max-width: 768px)').matches;
+        const loadingMessage = document.getElementById('map-loading-message');
+        customers = await parseCustomerDataAsync(rows, {
+            chunkSize: isMobile ? 250 : 1000,
+            onProgress: (processed, total) => {
+                if (loadingMessage && total > 0) {
+                    const percent = Math.floor((processed / total) * 100);
+                    loadingMessage.textContent = `Memproses data FAT... ${percent}%`;
+                }
+            }
+        });
         const t1 = performance.now();
         console.log('[CUSTOMER_MAP] loadData parsed customers count=', customers.length, 'parseMs=', Math.round(t1 - t0));
         siteValuesCache.clear();
