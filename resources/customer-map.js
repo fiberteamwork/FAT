@@ -6,7 +6,7 @@
 
 console.log('[CUSTOMER_MAP] loaded version 20260924.1 (FAT XLSX)');
 
-const DATA_URL = "./data/Data FAT Full.xlsx";
+const DATA_URL = "./data/Data FAT Full.xlsx?v=20261012.1";
 const ASIANET_SURABAYA_FOCUS = {
     longitude: 112.77226981789323,
     latitude: -7.327167247734099,
@@ -3780,7 +3780,8 @@ async function saveCsvTextToServerOrDownload(csvText, options = {}) {
         // Skip GitHub — langsung download file sebagai fallback
         if (append) {
             try {
-                const existingResponse = await fetch(DATA_URL + '?v=' + Date.now());
+                const cacheBust = DATA_URL.includes('?') ? '&' : '?';
+                const existingResponse = await fetch(DATA_URL + cacheBust + 'v=' + Date.now());
                 if (!existingResponse.ok) {
                     throw new Error('Fetch existing DATA_URL failed: ' + existingResponse.status + ' ' + existingResponse.statusText);
                 }
@@ -4221,7 +4222,7 @@ async function loadXlsxArrayBuffer(url) {
     }
     let lastError = null;
     try {
-        const response = await fetch(url, { cache: 'no-cache' });
+        const response = await fetch(url, { cache: 'force-cache' });
         if (!response.ok) {
             throw new Error('Data gagal dibaca. HTTP ' + response.status);
         }
@@ -4314,7 +4315,9 @@ async function loadData(input = null) {
         // Ensure polygon layers are ready so ward index is accurate
         await waitForLayersReady(5000, 5);
         const xlsxBufferPromise = input === null
-            ? loadXlsxArrayBuffer(DATA_URL)
+            ? (window.customerDataPreload
+                ? window.customerDataPreload.then(buffer => buffer || loadXlsxArrayBuffer(DATA_URL))
+                : loadXlsxArrayBuffer(DATA_URL))
             : null;
         try { buildWardIndex(); } catch(e){ console.warn('buildWardIndex failed (pre-fetch)', e); }
         try { buildWardPolygonIndex(); } catch(e){ console.warn('buildWardPolygonIndex failed (pre-fetch)', e); }
@@ -4362,11 +4365,16 @@ async function loadData(input = null) {
         drawCustomers(customers, { expandGroups: true });
         updateSummary(customers);
         updateChart(customers);
+        window.customerMapReady = true;
+        const loadingStatus = document.getElementById('map-loading');
+        if (loadingStatus) loadingStatus.hidden = true;
 
     }
 catch (error) {
 
     console.error(error);
+    const loadingStatus = document.getElementById('map-loading');
+    if (loadingStatus) loadingStatus.hidden = true;
 
     alert(
         "ERROR\n\n" +
