@@ -1,12 +1,8 @@
 (function () {
     'use strict';
 
-    const DATABASE_NAME = 'east-regional-browser-auth';
-    const DATABASE_VERSION = 1;
-    const ACCOUNT_STORE = 'accounts';
-    const ITERATIONS = 210000;
-    const SESSION_KEY = 'eastRegionalSession';
-    let database;
+    const SESSION_LABEL = 'eastRegionalSession';
+    let authClient;
     let activeAccount = null;
     let resolveReady;
     const ready = new Promise(resolve => {
@@ -21,192 +17,62 @@
         if (element) element.textContent = message;
     }
 
-    function openDatabase() {
-        return new Promise((resolve, reject) => {
-            if (!window.indexedDB) {
-                reject(new Error('Browser ini tidak mendukung IndexedDB.'));
-                return;
+    function getErrorMessage(error, fallback) {
+        return error && error.message ? error.message : fallback;
+    }
+
+    async function accountApi(action, values) {
+        const { data, error } = await authClient.functions.invoke('account-api', {
+            body: { action, ...(values || {}) }
+        });
+
+        if (error) {
+            let responseData = data;
+            if (!responseData && error.context instanceof Response) {
+                responseData = await error.context.clone().json().catch(() => null);
             }
-            const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-            request.onupgradeneeded = () => {
-                const db = request.result;
-                if (!db.objectStoreNames.contains(ACCOUNT_STORE)) {
-                    db.createObjectStore(ACCOUNT_STORE, { keyPath: 'usernameKey' });
-                }
-            };
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error || new Error('Database akun gagal dibuka.'));
-        });
-    }
-
-    function accountRequest(mode, action) {
-        return new Promise((resolve, reject) => {
-            const transaction = database.transaction(ACCOUNT_STORE, mode);
-            const request = action(transaction.objectStore(ACCOUNT_STORE));
-            let result;
-            request.onsuccess = () => {
-                result = request.result;
-            };
-            request.onerror = () => reject(request.error || new Error('Operasi akun gagal.'));
-            transaction.oncomplete = () => resolve(result);
-            transaction.onerror = () => reject(transaction.error || new Error('Operasi akun gagal.'));
-            transaction.onabort = () => reject(transaction.error || new Error('Transaksi database akun dibatalkan.'));
-        });
-    }
-
-    function listAccounts() {
-        return accountRequest('readonly', store => store.getAll());
-    }
-
-    function normalizeUsername(value) {
-        return String(value || '').trim();
-    }
-
-    function usernameKey(value) {
-        return normalizeUsername(value).toLowerCase();
-    }
-
-    function validateUsername(value) {
-        return /^[a-zA-Z0-9._-]{3,32}$/.test(value);
-    }
-
-    function bytesToBase64(bytes) {
-        let binary = '';
-        bytes.forEach(byte => {
-            binary += String.fromCharCode(byte);
-        });
-        return btoa(binary);
-    }
-
-    function base64ToBytes(value) {
-        return Uint8Array.from(atob(value), character => character.charCodeAt(0));
-    }
-
-    async function derivePasswordHash(password, salt) {
-        if (!window.crypto?.subtle) {
-            throw new Error('Web Crypto tidak tersedia. Buka aplikasi melalui HTTPS atau localhost.');
+            throw new Error(responseData && responseData.error
+                ? responseData.error
+                : error.message || 'Layanan akun tidak dapat dihubungi.');
         }
-        const passwordKey = await crypto.subtle.importKey(
-            'raw',
-            new TextEncoder().encode(password),
-            'PBKDF2',
-            false,
-            ['deriveBits']
-        );
-        const bits = await crypto.subtle.deriveBits({
-            name: 'PBKDF2',
-            salt,
-            iterations: ITERATIONS,
-            hash: 'SHA-256'
-        }, passwordKey, 256);
-        return new Uint8Array(bits);
+        if (!data || data.error) {
+            throw new Error(data && data.error ? data.error : 'Respons layanan akun tidak valid.');
+        }
+        return data;
     }
 
-    function saveAccount(account, onlyIfDatabaseIsEmpty) {
-        return new Promise((resolve, reject) => {
-            const transaction = database.transaction(ACCOUNT_STORE, 'readwrite');
-            const store = transaction.objectStore(ACCOUNT_STORE);
-            let operationError = null;
-
-            const add = () => {
-                const request = store.add(account);
-                request.onerror = () => {
-                    if (request.error && request.error.name === 'ConstraintError') {
-                        operationError = new Error('Username sudah digunakan.');
-                    }
-                };
-            };
-
-            if (onlyIfDatabaseIsEmpty) {
-                const countRequest = store.count();
-                countRequest.onsuccess = () => {
-                    if (countRequest.result > 0) {
-                        operationError = new Error('Admin pertama sudah dibuat. Silakan masuk dengan akun yang tersedia.');
-                        transaction.abort();
-                        return;
-                    }
-                    add();
-                };
-                countRequest.onerror = () => {
-                    operationError = countRequest.error || new Error('Operasi akun gagal.');
-                };
-            } else {
-                add();
-            }
-
-            transaction.oncomplete = () => resolve(account);
-            transaction.onerror = () => reject(operationError || transaction.error || new Error('Operasi akun gagal.'));
-            transaction.onabort = () => reject(operationError || transaction.error || new Error('Transaksi database akun dibatalkan.'));
-        });
+    function loginAccount(account) {
+        activeAccount = { username: account.username, role: account.role };
+        sessionStorage.setItem(SESSION_LABEL, account.username);
+        byId('auth-session-label').textContent =
+            `${activeAccount.username} ${activeAccount.role === 'admin' ? 'Admin' : 'User'}`;
+        byId('auth-manage-users').hidden = activeAccount.role !== 'admin';
+        byId('auth-gate').hidden = true;
+        document.body.classList.add('auth-ready');
+        resolveReady(activeAccount);
     }
 
-    async function createAccount(username, password, role, onlyIfDatabaseIsEmpty = false) {
-        const cleanUsername = normalizeUsername(username);
-        const key = usernameKey(cleanUsername);
-        if (!validateUsername(cleanUsername)) {
-            throw new Error('Username harus 3-32 karakter: huruf, angka, titik, garis bawah, atau tanda hubung.');
-        }
-        if (password.length < 8) {
-            throw new Error('Password harus minimal 8 karakter.');
-        }
-        if (role !== 'admin' && role !== 'user') {
-            throw new Error('Peran akun tidak valid.');
-        }
-
-        const salt = crypto.getRandomValues(new Uint8Array(16));
-        const passwordHash = await derivePasswordHash(password, salt);
-        const account = {
-            usernameKey: key,
-            username: cleanUsername,
-            role,
-            salt: bytesToBase64(salt),
-            passwordHash: bytesToBase64(passwordHash),
-            iterations: ITERATIONS,
-            createdAt: new Date().toISOString()
-        };
-
-        return saveAccount(account, onlyIfDatabaseIsEmpty);
+    function showLogin() {
+        activeAccount = null;
+        sessionStorage.removeItem(SESSION_LABEL);
+        document.body.classList.remove('auth-ready');
+        byId('auth-gate').hidden = false;
+        byId('auth-setup-view').hidden = true;
+        byId('auth-login-view').hidden = false;
+        byId('user-management-modal').hidden = true;
+        byId('change-password-modal').hidden = true;
+        byId('auth-login-username').focus();
     }
 
-    function bytesMatch(left, right) {
-        if (left.length !== right.length) return false;
-        let difference = 0;
-        for (let index = 0; index < left.length; index++) {
-            difference |= left[index] ^ right[index];
-        }
-        return difference === 0;
-    }
-
-    async function verifyPassword(account, password) {
-        const hash = await derivePasswordHash(password, base64ToBytes(account.salt));
-        return bytesMatch(hash, base64ToBytes(account.passwordHash));
-    }
-
-    async function changePassword(currentPassword, newPassword) {
-        if (!activeAccount) throw new Error('Silakan masuk kembali untuk mengubah password.');
-        if (newPassword.length < 8) throw new Error('Password baru harus minimal 8 karakter.');
-
-        const key = usernameKey(activeAccount.username);
-        const account = await accountRequest('readonly', store => store.get(key));
-        if (!account || !(await verifyPassword(account, currentPassword))) {
-            throw new Error('Password saat ini tidak sesuai.');
-        }
-
-        const salt = crypto.getRandomValues(new Uint8Array(16));
-        const passwordHash = await derivePasswordHash(newPassword, salt);
-        const updatedAccount = {
-            ...account,
-            salt: bytesToBase64(salt),
-            passwordHash: bytesToBase64(passwordHash),
-            iterations: ITERATIONS,
-            passwordUpdatedAt: new Date().toISOString()
-        };
-        await accountRequest('readwrite', store => store.put(updatedAccount));
+    function showSetup() {
+        byId('auth-subtitle').textContent = 'Buat admin pertama untuk digunakan bersama di semua perangkat.';
+        byId('auth-setup-view').hidden = false;
+        byId('auth-login-view').hidden = true;
+        byId('auth-setup-username').focus();
     }
 
     function renderAccounts(accounts) {
         const list = byId('auth-account-list');
-        if (!list) return;
         list.replaceChildren();
         accounts
             .sort((left, right) => left.username.localeCompare(right.username))
@@ -222,48 +88,16 @@
     }
 
     async function refreshAccounts() {
-        renderAccounts(await listAccounts());
+        const result = await accountApi('list');
+        renderAccounts(result.accounts);
     }
 
-    function showLogin() {
-        activeAccount = null;
-        sessionStorage.removeItem(SESSION_KEY);
-        document.body.classList.remove('auth-ready');
-        byId('auth-gate').hidden = false;
-        byId('auth-setup-view').hidden = true;
-        byId('auth-login-view').hidden = false;
-        byId('user-management-modal').hidden = true;
-        byId('change-password-modal').hidden = true;
-        byId('auth-login-username').focus();
-    }
-
-    function loginAccount(account) {
-        activeAccount = { username: account.username, role: account.role };
-        sessionStorage.setItem(SESSION_KEY, account.usernameKey);
-        byId('auth-session-label').textContent = `${activeAccount.username} ${activeAccount.role === 'admin' ? 'Admin' : 'User'}`;
-        byId('auth-manage-users').hidden = activeAccount.role !== 'admin';
-        byId('auth-gate').hidden = true;
-        document.body.classList.add('auth-ready');
-        resolveReady(activeAccount);
-    }
-
-    async function restoreSession() {
-        const savedKey = sessionStorage.getItem(SESSION_KEY);
-        if (!savedKey) return false;
-        const account = await accountRequest('readonly', store => store.get(savedKey));
-        if (!account) {
-            sessionStorage.removeItem(SESSION_KEY);
-            return false;
-        }
-        loginAccount(account);
-        return true;
-    }
-
-    function showSetup() {
-        byId('auth-subtitle').textContent = 'FAT East Region,dengan filter data Survey FAT';
-        byId('auth-setup-view').hidden = false;
-        byId('auth-login-view').hidden = true;
-        byId('auth-setup-username').focus();
+    async function signIn(username, password) {
+        const email = `${username.trim().toLowerCase()}@accounts.eastregional.invalid`;
+        const { error } = await authClient.auth.signInWithPassword({ email, password });
+        if (error) throw new Error('Username atau password salah.');
+        const result = await accountApi('me');
+        loginAccount(result.account);
     }
 
     function bindEvents() {
@@ -273,16 +107,14 @@
             button.disabled = true;
             setMessage('auth-setup-message', '');
             try {
-                const account = await createAccount(
-                    byId('auth-setup-username').value,
-                    byId('auth-setup-password').value,
-                    'admin',
-                    true
-                );
-                loginAccount(account);
+                const username = byId('auth-setup-username').value;
+                const password = byId('auth-setup-password').value;
+                const setupKey = byId('auth-setup-key').value;
+                await accountApi('setup', { username, password, setupKey });
+                await signIn(username, password);
             } catch (error) {
-                const message = error.message || 'Akun admin gagal dibuat.';
-                if (message.startsWith('Admin pertama sudah dibuat.')) {
+                const message = getErrorMessage(error, 'Admin pertama gagal dibuat.');
+                if (message.includes('sudah dibuat')) {
                     byId('auth-setup-view').hidden = true;
                     byId('auth-login-view').hidden = false;
                     setMessage('auth-login-message', message);
@@ -301,23 +133,24 @@
             button.disabled = true;
             setMessage('auth-login-message', '');
             try {
-                const account = await accountRequest(
-                    'readonly',
-                    store => store.get(usernameKey(byId('auth-login-username').value))
-                );
-                if (!account || !(await verifyPassword(account, byId('auth-login-password').value))) {
-                    setMessage('auth-login-message', 'Username atau password salah.');
-                    return;
-                }
-                loginAccount(account);
+                await signIn(byId('auth-login-username').value, byId('auth-login-password').value);
             } catch (error) {
-                setMessage('auth-login-message', error.message || 'Login gagal.');
+                setMessage('auth-login-message', getErrorMessage(error, 'Login gagal.'));
             } finally {
                 button.disabled = false;
             }
         });
 
-        byId('auth-logout').addEventListener('click', showLogin);
+        byId('auth-logout').addEventListener('click', async () => {
+            const { error } = await authClient.auth.signOut();
+            if (error) {
+                console.error('[AUTH] Logout gagal:', error);
+                setMessage('auth-login-message', 'Logout gagal. Silakan coba lagi.');
+                return;
+            }
+            showLogin();
+        });
+
         byId('auth-change-password').addEventListener('click', () => {
             setMessage('change-password-message', '');
             byId('change-password-form').reset();
@@ -343,21 +176,30 @@
                 if (newPassword !== byId('auth-confirm-password').value) {
                     throw new Error('Konfirmasi password baru tidak sama.');
                 }
-                await changePassword(byId('auth-current-password').value, newPassword);
+                await accountApi('change-password', {
+                    currentPassword: byId('auth-current-password').value,
+                    newPassword
+                });
                 form.reset();
                 setMessage('change-password-message', 'Password berhasil diubah.');
             } catch (error) {
-                setMessage('change-password-message', error.message || 'Password gagal diubah.');
+                setMessage('change-password-message', getErrorMessage(error, 'Password gagal diubah.'));
             } finally {
                 button.disabled = false;
             }
         });
+
         byId('auth-manage-users').addEventListener('click', async () => {
-            if (activeAccount?.role !== 'admin') return;
-            setMessage('admin-user-message', '');
-            await refreshAccounts();
-            byId('user-management-modal').hidden = false;
-            byId('admin-new-username').focus();
+            if (activeAccount && activeAccount.role === 'admin') {
+                setMessage('admin-user-message', '');
+                try {
+                    await refreshAccounts();
+                    byId('user-management-modal').hidden = false;
+                    byId('admin-new-username').focus();
+                } catch (error) {
+                    setMessage('admin-user-message', getErrorMessage(error, 'Daftar akun gagal dimuat.'));
+                }
+            }
         });
         byId('user-management-close').addEventListener('click', () => {
             byId('user-management-modal').hidden = true;
@@ -370,25 +212,21 @@
 
         byId('admin-user-form').addEventListener('submit', async event => {
             event.preventDefault();
-            if (activeAccount?.role !== 'admin') {
-                setMessage('admin-user-message', 'Hanya admin yang dapat menambahkan akun.');
-                return;
-            }
             const form = event.currentTarget;
             const button = byId('admin-user-submit');
             button.disabled = true;
             setMessage('admin-user-message', '');
             try {
-                await createAccount(
-                    byId('admin-new-username').value,
-                    byId('admin-new-password').value,
-                    byId('admin-new-role').value
-                );
+                await accountApi('create', {
+                    username: byId('admin-new-username').value,
+                    password: byId('admin-new-password').value,
+                    role: byId('admin-new-role').value
+                });
                 form.reset();
-                setMessage('admin-user-message', 'Akun berhasil ditambahkan.');
+                setMessage('admin-user-message', 'Akun bersama berhasil ditambahkan.');
                 await refreshAccounts();
             } catch (error) {
-                setMessage('admin-user-message', error.message || 'Akun gagal ditambahkan.');
+                setMessage('admin-user-message', getErrorMessage(error, 'Akun gagal ditambahkan.'));
             } finally {
                 button.disabled = false;
             }
@@ -396,19 +234,47 @@
     }
 
     async function initialize() {
-        try {
-            database = await openDatabase();
-            bindEvents();
-            if (await restoreSession()) return;
-            const accounts = await listAccounts();
-            if (accounts.length === 0) showSetup();
-            else byId('auth-login-view').hidden = false;
-        } catch (error) {
-            const message = error.message || 'Database akun gagal dimuat.';
+        bindEvents();
+        const config = window.EAST_REGIONAL_SUPABASE;
+        if (!config || !config.url || !config.anonKey ||
+            config.url.includes('YOUR-PROJECT') || config.anonKey.includes('YOUR-ANON-KEY')) {
+            const message = 'Backend akun belum dikonfigurasi. Isi URL dan anon key Supabase di resources/supabase-config.js.';
             byId('auth-subtitle').textContent = message;
             setMessage('auth-login-message', message);
             byId('auth-login-view').hidden = false;
-            console.error('[AUTH] Inisialisasi login gagal:', error);
+            console.error('[AUTH] Konfigurasi Supabase belum diisi.');
+            return;
+        }
+
+        try {
+            authClient = window.supabase.createClient(config.url, config.anonKey, {
+                auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+            });
+            const { data: { session }, error } = await authClient.auth.getSession();
+            if (error) throw error;
+            if (session) {
+                try {
+                    const result = await accountApi('me');
+                    loginAccount(result.account);
+                    return;
+                } catch (error) {
+                    await authClient.auth.signOut();
+                    console.warn('[AUTH] Sesi sebelumnya tidak berlaku:', error);
+                }
+            }
+
+            const status = await accountApi('status');
+            if (status.hasAccounts) {
+                byId('auth-login-view').hidden = false;
+            } else {
+                showSetup();
+            }
+        } catch (error) {
+            const message = getErrorMessage(error, 'Layanan akun gagal dimuat.');
+            byId('auth-subtitle').textContent = message;
+            setMessage('auth-login-message', message);
+            byId('auth-login-view').hidden = false;
+            console.error('[AUTH] Inisialisasi autentikasi gagal:', error);
         }
     }
 
