@@ -17,10 +17,15 @@ const ASIANET_SURABAYA_FOCUS = {
 const DEBUG_HIGHLIGHT_MARKERS = false;
 
 let customers = [];
+const siteValuesCache = new Map();
+const MAX_SITE_DROPDOWN_OPTIONS = 100;
 let customerLayer = null;
 let customerSource = null;
 let customerExpandedLayer = null;
 let customerExpandedSource = null;
+let activeMapCustomers = [];
+let activeMapDrawOptions = {};
+let mapViewportRenderTimer = null;
 let wardChart = null;
 let customerDrawVersion = 0;
 let customerDrawTimeout = null;
@@ -2041,6 +2046,39 @@ function createCustomerLayer() {
    DRAW MARKERS
    ========================================================= */
 
+function getCustomersInMapViewport(data) {
+    if (!Array.isArray(data) || typeof map === 'undefined' || !map || !map.getView) return data;
+    const size = map.getSize();
+    if (!size || !size[0] || !size[1]) return data;
+
+    const view = map.getView();
+    const extent = view.calculateExtent(size);
+    const lowerLeft = ol.proj.toLonLat([extent[0], extent[1]]);
+    const upperRight = ol.proj.toLonLat([extent[2], extent[3]]);
+    const marginX = (upperRight[0] - lowerLeft[0]) * 0.2;
+    const marginY = (upperRight[1] - lowerLeft[1]) * 0.2;
+    const minLongitude = lowerLeft[0] - marginX;
+    const maxLongitude = upperRight[0] + marginX;
+    const minLatitude = lowerLeft[1] - marginY;
+    const maxLatitude = upperRight[1] + marginY;
+
+    return data.filter(customer => {
+        const latitude = Number(customer.latitude);
+        const longitude = Number(customer.longitude);
+        return Number.isFinite(latitude) && Number.isFinite(longitude) &&
+            latitude >= minLatitude && latitude <= maxLatitude &&
+            longitude >= minLongitude && longitude <= maxLongitude;
+    });
+}
+
+function scheduleViewportCustomerRender() {
+    if (!activeMapCustomers.length || mapViewportRenderTimer !== null) return;
+    mapViewportRenderTimer = setTimeout(() => {
+        mapViewportRenderTimer = null;
+        drawCustomers(activeMapCustomers, activeMapDrawOptions);
+    }, 120);
+}
+
 function drawCustomers(data, options){
 
     customerDrawVersion++;
@@ -2051,6 +2089,12 @@ function drawCustomers(data, options){
         console.error('drawCustomers: customerSource is not initialized');
         return;
     }
+
+    activeMapCustomers = Array.isArray(data) ? data : [];
+    activeMapDrawOptions = options || {};
+    const totalDataCount = activeMapCustomers.length;
+    data = getCustomersInMapViewport(activeMapCustomers);
+    console.log('[DRAW] viewport rows=', data.length, 'of', totalDataCount);
 
     if (customerDrawTimeout) {
         try { clearTimeout(customerDrawTimeout); } catch (e) { }
@@ -2068,7 +2112,7 @@ function drawCustomers(data, options){
 
     // Allow option to expand group members into individual markers when requested
     // If options.expandGroups is true, render one marker per input row instead of aggregating by ID.
-    const opts = options || {};
+    const opts = activeMapDrawOptions;
     const expandGroups = !!opts.expandGroups;
 
     const makeFeature = customer => {
@@ -3117,6 +3161,15 @@ normalize(
 
 }
 
+function getSiteValues(city) {
+    const cacheKey = city || "";
+    if (!siteValuesCache.has(cacheKey)) {
+        const data = city ? customers.filter(customer => customer.city === city) : customers;
+        siteValuesCache.set(cacheKey, uniqueValues(data, "site"));
+    }
+    return siteValuesCache.get(cacheKey);
+}
+
 
 /* =========================================================
    FILL SELECT
@@ -3167,11 +3220,14 @@ function renderSiteDropdown(values, selectedValue) {
 
     toggle.textContent = selectedValue || "Semua Nama Site";
     const query = normalize(search.value).toLowerCase();
-    const matchingValues = values.filter(value => normalize(value).toLowerCase().includes(query));
-    const optionValues = ["", ...matchingValues];
+    const matchingValues = query
+        ? values.filter(value => normalize(value).toLowerCase().includes(query))
+        : [];
+    const visibleValues = matchingValues.slice(0, MAX_SITE_DROPDOWN_OPTIONS);
 
     options.replaceChildren();
-    optionValues.forEach(value => {
+    const fragment = document.createDocumentFragment();
+    const addOption = value => {
         const option = document.createElement("button");
         option.type = "button";
         option.className = "site-dropdown-option";
@@ -3180,7 +3236,16 @@ function renderSiteDropdown(values, selectedValue) {
         option.textContent = value || "Semua Nama Site";
         option.addEventListener("click", () => {
             const select = document.getElementById("filter-site");
-            if (select) select.value = value;
+            if (select) {
+                let selectedOption = Array.from(select.options).find(item => item.value === value);
+                if (!selectedOption) {
+                    selectedOption = document.createElement("option");
+                    selectedOption.value = value;
+                    selectedOption.textContent = value || "Semua Nama Site";
+                    select.appendChild(selectedOption);
+                }
+                select.value = value;
+            }
             toggle.textContent = value || "Semua Nama Site";
             document.getElementById("filter-site-panel").hidden = true;
             toggle.setAttribute("aria-expanded", "false");
@@ -3189,15 +3254,32 @@ function renderSiteDropdown(values, selectedValue) {
             applyFilters();
             toggle.focus();
         });
-        options.appendChild(option);
-    });
+        fragment.appendChild(option);
+    };
 
-    if (matchingValues.length === 0) {
+    addOption("");
+    if (selectedValue && !visibleValues.includes(selectedValue)) {
+        addOption(selectedValue);
+    }
+    visibleValues.forEach(addOption);
+
+    if (!query && values.length > 0) {
+        const empty = document.createElement("div");
+        empty.className = "site-dropdown-option";
+        empty.textContent = "Ketik nama site untuk mencari";
+        fragment.appendChild(empty);
+    } else if (query && matchingValues.length === 0) {
         const empty = document.createElement("div");
         empty.className = "site-dropdown-option";
         empty.textContent = "Nama site tidak ditemukan";
-        options.appendChild(empty);
+        fragment.appendChild(empty);
+    } else if (matchingValues.length > MAX_SITE_DROPDOWN_OPTIONS) {
+        const more = document.createElement("div");
+        more.className = "site-dropdown-option";
+        more.textContent = `Menampilkan ${MAX_SITE_DROPDOWN_OPTIONS} dari ${matchingValues.length}; perjelas pencarian`;
+        fragment.appendChild(more);
     }
+    options.appendChild(fragment);
 }
 
 
@@ -3242,10 +3324,7 @@ function updateFilters() {
     }
 
     // Daftar nama site (dibatasi kota bila dipilih)
-    const siteData = city ? customers.filter(c => c.city === city) : customers;
-
-    const siteValues =
-        uniqueValues(siteData, "site");
+    const siteValues = getSiteValues(city);
 
     if (
         selectedSite &&
@@ -3528,10 +3607,7 @@ if (siteDropdownToggle && siteDropdownPanel && siteDropdownSearch) {
             const siteSelect = document.getElementById("filter-site");
             const citySelect = document.getElementById("filter-city");
             const city = citySelect?.value || "";
-            const sites = uniqueValues(
-                city ? customers.filter(customer => customer.city === city) : customers,
-                "site"
-            );
+            const sites = getSiteValues(city);
             renderSiteDropdown(sites, siteSelect?.value || "");
             siteDropdownSearch.focus();
         }
@@ -3539,10 +3615,7 @@ if (siteDropdownToggle && siteDropdownPanel && siteDropdownSearch) {
     siteDropdownSearch.addEventListener("input", () => {
         const siteSelect = document.getElementById("filter-site");
         const city = document.getElementById("filter-city")?.value || "";
-        const sites = uniqueValues(
-            city ? customers.filter(customer => customer.city === city) : customers,
-            "site"
-        );
+        const sites = getSiteValues(city);
         renderSiteDropdown(sites, siteSelect?.value || "");
     });
     document.addEventListener("click", event => {
@@ -4363,6 +4436,7 @@ async function loadData(input = null) {
         customers = await parseCustomerDataAsync(rows, { chunkSize: 1000 });
         const t1 = performance.now();
         console.log('[CUSTOMER_MAP] loadData parsed customers count=', customers.length, 'parseMs=', Math.round(t1 - t0));
+        siteValuesCache.clear();
         customers = deduplicateCustomerMarkers(customers);
 
         if (customers.length === 0) {
@@ -4371,7 +4445,9 @@ async function loadData(input = null) {
             console.log('[CUSTOMER_MAP] loadData fallback customers count=', customers.length);
         }
 
-        try { updateFilters(); } catch (e) { }
+        const filterStart = performance.now();
+        try { updateFilters(); } catch (e) { console.error('[CUSTOMER_MAP] updateFilters gagal', e); }
+        console.log('[CUSTOMER_MAP] filter setup ms=', Math.round(performance.now() - filterStart));
 
         setupFilters();
         setupDashboard();
@@ -4451,6 +4527,11 @@ async function startCustomerMap() {
             return;
         }
         await new Promise(resolve => setTimeout(resolve, 5));
+    }
+
+    if (!map._customerViewportRenderBound) {
+        map.on('moveend', scheduleViewportCustomerRender);
+        map._customerViewportRenderBound = true;
     }
 
     // Remove controls left by an older cached script version.
