@@ -43,8 +43,13 @@
         return new Promise((resolve, reject) => {
             const transaction = database.transaction(ACCOUNT_STORE, mode);
             const request = action(transaction.objectStore(ACCOUNT_STORE));
-            request.onsuccess = () => resolve(request.result);
+            let result;
+            request.onsuccess = () => {
+                result = request.result;
+            };
             request.onerror = () => reject(request.error || new Error('Operasi akun gagal.'));
+            transaction.oncomplete = () => resolve(result);
+            transaction.onerror = () => reject(transaction.error || new Error('Operasi akun gagal.'));
             transaction.onabort = () => reject(transaction.error || new Error('Transaksi database akun dibatalkan.'));
         });
     }
@@ -97,7 +102,45 @@
         return new Uint8Array(bits);
     }
 
-    async function createAccount(username, password, role) {
+    function saveAccount(account, onlyIfDatabaseIsEmpty) {
+        return new Promise((resolve, reject) => {
+            const transaction = database.transaction(ACCOUNT_STORE, 'readwrite');
+            const store = transaction.objectStore(ACCOUNT_STORE);
+            let operationError = null;
+
+            const add = () => {
+                const request = store.add(account);
+                request.onerror = () => {
+                    if (request.error && request.error.name === 'ConstraintError') {
+                        operationError = new Error('Username sudah digunakan.');
+                    }
+                };
+            };
+
+            if (onlyIfDatabaseIsEmpty) {
+                const countRequest = store.count();
+                countRequest.onsuccess = () => {
+                    if (countRequest.result > 0) {
+                        operationError = new Error('Admin pertama sudah dibuat. Silakan masuk dengan akun yang tersedia.');
+                        transaction.abort();
+                        return;
+                    }
+                    add();
+                };
+                countRequest.onerror = () => {
+                    operationError = countRequest.error || new Error('Operasi akun gagal.');
+                };
+            } else {
+                add();
+            }
+
+            transaction.oncomplete = () => resolve(account);
+            transaction.onerror = () => reject(operationError || transaction.error || new Error('Operasi akun gagal.'));
+            transaction.onabort = () => reject(operationError || transaction.error || new Error('Transaksi database akun dibatalkan.'));
+        });
+    }
+
+    async function createAccount(username, password, role, onlyIfDatabaseIsEmpty = false) {
         const cleanUsername = normalizeUsername(username);
         const key = usernameKey(cleanUsername);
         if (!validateUsername(cleanUsername)) {
@@ -122,15 +165,7 @@
             createdAt: new Date().toISOString()
         };
 
-        try {
-            await accountRequest('readwrite', store => store.add(account));
-        } catch (error) {
-            if (error && error.name === 'ConstraintError') {
-                throw new Error('Username sudah digunakan.');
-            }
-            throw error;
-        }
-        return account;
+        return saveAccount(account, onlyIfDatabaseIsEmpty);
     }
 
     function bytesMatch(left, right) {
@@ -241,11 +276,20 @@
                 const account = await createAccount(
                     byId('auth-setup-username').value,
                     byId('auth-setup-password').value,
-                    'admin'
+                    'admin',
+                    true
                 );
                 loginAccount(account);
             } catch (error) {
-                setMessage('auth-setup-message', error.message || 'Akun admin gagal dibuat.');
+                const message = error.message || 'Akun admin gagal dibuat.';
+                if (message.startsWith('Admin pertama sudah dibuat.')) {
+                    byId('auth-setup-view').hidden = true;
+                    byId('auth-login-view').hidden = false;
+                    setMessage('auth-login-message', message);
+                    byId('auth-login-username').focus();
+                } else {
+                    setMessage('auth-setup-message', message);
+                }
             } finally {
                 button.disabled = false;
             }
