@@ -12,6 +12,60 @@
 
     const byId = id => document.getElementById(id);
 
+    let mapLoadPromise = null;
+
+    function loadMapApplication() {
+        if (mapLoadPromise) return mapLoadPromise;
+
+        const scripts = [
+            'resources/qgis2web_expressions.js',
+            'resources/xlsx-lite.js',
+            'resources/functions.js',
+            'resources/ol.js',
+            'resources/ol-layerswitcher.js',
+            'resources/photon-geocoder-autocomplete.min.js',
+            'resources/olms.js',
+            'layers/SIDOARJO_1.js',
+            'layers/Denpasar_1.js',
+            'layers/surabaya_2.js',
+            'styles/SIDOARJO_1_style.js',
+            'styles/surabaya_2_style.js',
+            'layers/layers.js',
+            'resources/Autolinker.min.js',
+            'resources/qgis2web.js',
+            'https://cdn.jsdelivr.net/npm/chart.js',
+            'resources/customer-map.js?v=20261012.12'
+        ];
+
+        const loadingMessage = byId('map-loading-message');
+        if (loadingMessage) loadingMessage.textContent = 'Menyiapkan peta dan data FAT...';
+        window.customerDataPreload = fetch('./data/Data FAT Full.xlsx?v=20261012.1', {
+            cache: 'force-cache'
+        }).then(response => {
+            if (!response.ok) throw new Error('Data FAT gagal dimuat. HTTP ' + response.status);
+            return response.arrayBuffer();
+        }).catch(error => {
+            console.warn('[MAP] Prefetch data FAT gagal; akan dicoba kembali saat peta siap.', error);
+            return null;
+        });
+        mapLoadPromise = Promise.all(scripts.map(src => new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.async = false;
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Gagal memuat komponen peta: ' + src));
+            document.body.appendChild(script);
+        }))).catch(error => {
+            console.error('[MAP] Pemuatan peta gagal:', error);
+            if (loadingMessage) {
+                loadingMessage.textContent = 'Peta gagal dimuat. Periksa koneksi lalu muat ulang halaman.';
+            }
+            return null;
+        });
+
+        return mapLoadPromise;
+    }
+
     function setMessage(id, message) {
         const element = byId(id);
         if (element) element.textContent = message;
@@ -49,7 +103,12 @@
         byId('auth-manage-users').hidden = activeAccount.role !== 'admin';
         byId('auth-gate').hidden = true;
         document.body.classList.add('auth-ready');
+        const mapLoading = byId('map-loading');
+        if (mapLoading) {
+            mapLoading.hidden = window.customerMapReady === true;
+        }
         resolveReady(activeAccount);
+        loadMapApplication();
     }
 
     function showLogin() {
