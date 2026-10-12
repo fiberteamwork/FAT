@@ -256,6 +256,7 @@ function focusMapOnAsianetSurabaya(){
 let cityBoundaryIndex = new Map();
 let cityBoundaryAliases = new Map();
 let cityBoundarySpatialIndex = new Map();
+let cityCoordinateCheckCache = new Map();
 let siteCoordinateIndex = new Map();
 const CITY_BOUNDARY_GRID_SIZE = 2000;
 
@@ -263,6 +264,7 @@ function buildCityBoundaryIndex(){
     cityBoundaryIndex.clear();
     cityBoundaryAliases.clear();
     cityBoundarySpatialIndex.clear();
+    cityCoordinateCheckCache.clear();
 
     const layers = [
         typeof lyr_surabaya_2 !== 'undefined' ? lyr_surabaya_2 : null,
@@ -284,8 +286,7 @@ function buildCityBoundaryIndex(){
             }
             const boundary = {
                 geometry,
-                extent: geometry.getExtent(),
-                polygons: getOLGeometryPolygonRings(geometry)
+                extent: geometry.getExtent()
             };
             cityBoundaryIndex.get(cityKey).push(boundary);
 
@@ -330,16 +331,20 @@ function getCityBoundaryCityKey(city){
 function isCoordinateWithinCity(city, latitude, longitude){
     const cityKey = getCityBoundaryCityKey(city);
     if (!cityKey || !isWithinIndonesiaBounds(latitude, longitude)) return null;
+    const cacheKey = `${cityKey}|${latitude}|${longitude}`;
+    if (cityCoordinateCheckCache.has(cacheKey)) return cityCoordinateCheckCache.get(cacheKey);
 
     const coordinate = ol.proj.fromLonLat([longitude, latitude]);
     const cellX = Math.floor(coordinate[0] / CITY_BOUNDARY_GRID_SIZE);
     const cellY = Math.floor(coordinate[1] / CITY_BOUNDARY_GRID_SIZE);
     const candidates = cityBoundarySpatialIndex.get(cityKey)?.get(`${cellX}:${cellY}`) || [];
-    return candidates.some(({ extent, polygons }) => {
+    const isWithin = candidates.some(({ extent, geometry }) => {
         if (coordinate[0] < extent[0] || coordinate[0] > extent[2] ||
             coordinate[1] < extent[1] || coordinate[1] > extent[3]) return false;
-        return polygons.some(rings => pointInAnyPolygon(longitude, latitude, rings));
+        return geometry.intersectsCoordinate(coordinate);
     });
+    cityCoordinateCheckCache.set(cacheKey, isWithin);
+    return isWithin;
 }
 
 function normalizeFATCoordinates(latitude, longitude){
@@ -371,6 +376,7 @@ function getFATRowCoordinates(row, mapping){
 
 function buildSiteCoordinateIndex(rawRows, mapping){
     siteCoordinateIndex.clear();
+    cityCoordinateCheckCache.clear();
     if (!Array.isArray(rawRows) || !mapping || !mapping.city || !mapping.site) return;
 
     const candidatesBySite = new Map();
@@ -1122,28 +1128,36 @@ function normalizeLocationKeyCompact(city, district, ward) {
         .join("||");
 }
 
-function buildCsvWardCoordinateIndex(rawRows) {
+function buildCsvWardCoordinateIndex(rawRows, mapping = null) {
     csvWardCoordinateIndex.clear();
 
     if (!Array.isArray(rawRows) || rawRows.length === 0)
         return;
 
-    // detect header keys once for performance
     const headerKeys = Object.keys(rawRows[0] || {});
-    const defaultLatKey = headerKeys.find(k => /lat/i.test(k)) || "Latitude";
-    const defaultLonKey = headerKeys.find(k => /lon|lng|long|longitude|x/i.test(k)) || "Longitude";
+    const findHeader = aliases => headerKeys.find(key => aliases.includes(normalizeKey(key)));
+    const cityKey = mapping?.city || findHeader(['city']);
+    const districtKey = mapping?.district || findHeader(['district', 'kecamatan', 'kec']);
+    const wardKey = mapping?.ward || findHeader(['ward', 'village', 'desa', 'kelurahan', 'kel']);
+    if (!districtKey && !wardKey) return;
+
+    const defaultLatKey = mapping?.latitude || headerKeys.find(k => /lat/i.test(k)) || "Latitude";
+    const defaultLonKey = mapping?.longitude || headerKeys.find(k => /lon|lng|long|longitude|x/i.test(k)) || "Longitude";
 
     rawRows.forEach(row => {
-        const city = normalize(row["City"] || "");
-        const district = normalize(row["District"] || "");
-        const ward = normalize(row["Ward"] || "");
+        const city = normalize(cityKey ? row[cityKey] || "" : "");
+        const district = normalize(districtKey ? row[districtKey] || "" : "");
+        const ward = normalize(wardKey ? row[wardKey] || "" : "");
         const strippedCity = normalize(stripAdminPrefixes(city));
         const strippedDistrict = normalize(stripAdminPrefixes(district));
         const wardShort = normalize(shortWardName(ward));
 
-        const keys = Object.keys(row);
-        const latKey = (defaultLatKey && Object.prototype.hasOwnProperty.call(row, defaultLatKey)) ? defaultLatKey : (keys.find(k => /lat/i.test(k)) || "Latitude");
-        const lonKey = (defaultLonKey && Object.prototype.hasOwnProperty.call(row, defaultLonKey)) ? defaultLonKey : (keys.find(k => /lon|lng|long|longitude|x/i.test(k)) || "Longitude");
+        const latKey = Object.prototype.hasOwnProperty.call(row, defaultLatKey)
+            ? defaultLatKey
+            : (headerKeys.find(k => /lat/i.test(k)) || "Latitude");
+        const lonKey = Object.prototype.hasOwnProperty.call(row, defaultLonKey)
+            ? defaultLonKey
+            : (headerKeys.find(k => /lon|lng|long|longitude|x/i.test(k)) || "Longitude");
 
         let rawLat = sanitizeNumberString(row[latKey] ?? row["Latitude"] ?? "");
         let rawLon = sanitizeNumberString(row[lonKey] ?? row["Longitude"] ?? "");
@@ -1719,13 +1733,12 @@ function parseCustomerData(rowsOrText){
 
     if(raw.length===0) return [];
 
-    try { buildCsvWardCoordinateIndex(raw); } catch (e) { console.warn('buildCsvWardCoordinateIndex (FAT mode) failed', e); }
-
     const mapping = resolveFATHeaders(raw);
     if (!mapping || (!mapping.label && !mapping.site && !mapping.city && !mapping.id)) {
         console.error('[CUSTOMER_MAP] Tidak ada kolom dikenali di dataset. Header tersedia:', Object.keys(raw[0] || {}));
         return [];
     }
+    try { buildCsvWardCoordinateIndex(raw, mapping); } catch (e) { console.warn('buildCsvWardCoordinateIndex (FAT mode) failed', e); }
     try {
         if (cityBoundaryIndex.size === 0) buildCityBoundaryIndex();
         buildSiteCoordinateIndex(raw, mapping);
@@ -1821,20 +1834,21 @@ function parseCustomerDataAsync(text, options = {}) {
             console.log('[CUSTOMER_MAP] parseCustomerDataAsync raw rows=', raw.length);
             if (!Array.isArray(raw) || raw.length === 0) return resolve([]);
 
-            // build index once
-            try { buildCsvWardCoordinateIndex(raw); } catch (e) { console.warn('buildCsvWardCoordinateIndex (FAT mode) failed', e); }
-
+            const setupStart = performance.now();
             const mapping = resolveFATHeaders(raw);
             if (!mapping || (!mapping.label && !mapping.site && !mapping.city && !mapping.id)) {
                 console.error('[CUSTOMER_MAP] parseCustomerDataAsync: header tidak dikenali');
                 return resolve([]);
             }
+            // A ward coordinate fallback needs district or ward columns.
+            try { buildCsvWardCoordinateIndex(raw, mapping); } catch (e) { console.warn('buildCsvWardCoordinateIndex (FAT mode) failed', e); }
             try {
                 if (cityBoundaryIndex.size === 0) buildCityBoundaryIndex();
                 buildSiteCoordinateIndex(raw, mapping);
             } catch (e) {
                 console.warn('buildSiteCoordinateIndex failed', e);
             }
+            const setupMs = Math.round(performance.now() - setupStart);
 
             const customers = [];
 
@@ -1865,7 +1879,9 @@ function parseCustomerDataAsync(text, options = {}) {
                     console.log('parseCustomerDataAsync: totalRaw=', raw.length,
                         'customersParsed=', customers.length,
                         'wardResolved=', wardResolvedCount,
-                        'defaulted=', defaultedCount);
+                        'defaulted=', defaultedCount,
+                        'setupMs=', setupMs,
+                        'rowParseMs=', Math.round(performance.now() - setupStart - setupMs));
                     resolve(customers);
                 }
             };
