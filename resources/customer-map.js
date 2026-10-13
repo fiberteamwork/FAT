@@ -102,10 +102,10 @@ const STATUS_CONFIG = {
 
 const PORT_STATUS_CONFIG = {
     full: { label: "Port Full🔴", color: "#ef4444" },
-    available: { label: "Available🟢", color: "#22c55e" },
+    available: { label: "Port Available🟢", color: "#22c55e" },
     noData: { label: "Belum Ada Data🟤", color: "#8b5e3c" },
-    needCheck: { label: "Need Check🟠", color: "#f97316" },
-    unavailable: { label: "UnAvailable⚫", color: "#111827" },
+    needCheck: { label: "Need Check Input FAT🟠", color: "#f97316" },
+    unavailable: { label: "Port UnAvailable⚫", color: "#111827" },
     partial: { label: "Partial🟡", color: "#f59e0b" },
     unknown: { label: "Tidak diketahui⚪", color: "#f9fafd" }
 };
