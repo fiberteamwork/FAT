@@ -268,18 +268,19 @@ body:not(.auth-ready) #data-view-overlay {
     display: none !important;
 }
 
-.map-loading-spinner {
-    width: 34px;
-    height: 34px;
+.map-loading-icon {
+    width: 52px;
+    height: 52px;
     margin: 0 auto;
-    border: 4px solid #cbd5e1;
-    border-top-color: #1769aa;
-    border-radius: 50%;
-    animation: map-loading-spin .8s linear infinite;
+    animation: map-loading-flip 1.2s ease-in-out infinite;
+    object-fit: contain;
+    backface-visibility: visible;
 }
 
-@keyframes map-loading-spin {
-    to { transform: rotate(360deg); }
+@keyframes map-loading-flip {
+    0% { transform: perspective(240px) rotateY(0deg); }
+    50% { transform: perspective(240px) rotateY(180deg); }
+    100% { transform: perspective(240px) rotateY(360deg); }
 }
 
 #auth-gate {
@@ -533,7 +534,7 @@ body:not(.auth-ready) #data-view-overlay {
     </div>
 </section>
 <div id="map-loading" role="status" aria-live="polite" hidden>
-    <span class="map-loading-spinner" aria-hidden="true"></span>
+    <img class="map-loading-icon" src="resources/iconamt.png" alt="" aria-hidden="true">
     <span id="map-loading-message">Menyiapkan peta dan data FAT...</span>
 </div>
 <section id="user-management-modal" hidden aria-labelledby="user-management-title">
