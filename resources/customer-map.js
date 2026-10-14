@@ -8,9 +8,9 @@ console.log('[CUSTOMER_MAP] loaded version 20260924.1 (FAT XLSX)');
 
 const DATA_URL = "./data/Data FAT Full.xlsx?v=20261012.1";
 const ASIANET_SURABAYA_FOCUS = {
-    longitude: 112.77226981789323,
-    latitude: -7.327167247734099,
-    zoom: 16
+    longitude: 112.772278,
+    latitude: -7.327206,
+    zoom: 10
 };
 // Debug: when true, markers are rendered as large bright red circles to aid visibility while debugging
 // Toggle to true to force-visible markers
@@ -102,10 +102,10 @@ const STATUS_CONFIG = {
 
 const PORT_STATUS_CONFIG = {
     full: { label: "Port Full🔴", color: "#ef4444" },
-    available: { label: "Available🟢", color: "#22c55e" },
+    available: { label: "Port Available🟢", color: "#22c55e" },
     noData: { label: "Belum Ada Data🟤", color: "#8b5e3c" },
-    needCheck: { label: "Need Check🟠", color: "#f97316" },
-    unavailable: { label: "UnAvailable⚫", color: "#111827" },
+    needCheck: { label: "Need Check Input FAT🟠", color: "#f97316" },
+    unavailable: { label: "Port UnAvailable⚫", color: "#111827" },
     partial: { label: "Partial🟡", color: "#f59e0b" },
     unknown: { label: "Tidak diketahui⚪", color: "#f9fafd" }
 };
@@ -264,6 +264,9 @@ let cityBoundaryAliases = new Map();
 let cityBoundarySpatialIndex = new Map();
 let cityCoordinateCheckCache = new Map();
 let siteCoordinateIndex = new Map();
+// Fallback koordinat per (kota||site) tanpa syarat ada polygon kota,
+// untuk baris yang koordinatnya sendiri tidak valid.
+let siteCityCoordinateIndex = new Map();
 const CITY_BOUNDARY_GRID_SIZE = 2000;
 
 function buildCityBoundaryIndex(){
@@ -421,6 +424,52 @@ function buildSiteCoordinateIndex(rawRows, mapping){
 }
 
 // Parse visit date strings (expects dd/mm/yyyy or d/m/yyyy, but tolerates other separators)
+// Indeks koordinat per (kota||site) dari baris yang koordinatnya valid.
+// Dipakai saat sebuah baris tidak punya koordinat valid (mis. longitude hanya 1 desimal)
+// agar marker mengikuti site yang sama, bukan jatuh ke koordinat default.
+function buildSiteCityCoordinateIndex(rawRows, mapping) {
+    siteCityCoordinateIndex.clear();
+    if (!Array.isArray(rawRows) || !mapping || !mapping.city || !mapping.site) return;
+
+    const candidatesBySite = new Map();
+    for (const row of rawRows) {
+        const city = normalize(row[mapping.city] ?? '');
+        const site = normalize(row[mapping.site] ?? '');
+        if (!city || !site) continue;
+
+        const { latitude, longitude } = getFATRowCoordinates(row, mapping);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+        if (!isWithinIndonesiaBounds(latitude, longitude)) continue;
+
+        const latDecimals = (String(latitude).split('.')[1] || '').length;
+        const lonDecimals = (String(longitude).split('.')[1] || '').length;
+        if (latDecimals < 2 || lonDecimals < 2) continue;
+
+        const key = `${normalizeKey(city)}||${normalizeKey(site)}`;
+        if (!candidatesBySite.has(key)) candidatesBySite.set(key, []);
+        candidatesBySite.get(key).push({ latitude, longitude });
+    }
+
+    for (const [key, candidates] of candidatesBySite) {
+        const latitudes = candidates.map(point => point.latitude).sort((a, b) => a - b);
+        const longitudes = candidates.map(point => point.longitude).sort((a, b) => a - b);
+        const middle = Math.floor(candidates.length / 2);
+        const medianLatitude = latitudes.length % 2
+            ? latitudes[middle]
+            : (latitudes[middle - 1] + latitudes[middle]) / 2;
+        const medianLongitude = longitudes.length % 2
+            ? longitudes[middle]
+            : (longitudes[middle - 1] + longitudes[middle]) / 2;
+
+        const representative = candidates.reduce((closest, point) => {
+            const distance = Math.pow(point.latitude - medianLatitude, 2) +
+                Math.pow((point.longitude - medianLongitude) * Math.cos(medianLatitude * Math.PI / 180), 2);
+            return !closest || distance < closest.distance ? { point, distance } : closest;
+        }, null);
+        if (representative) siteCityCoordinateIndex.set(key, representative.point);
+    }
+}
+
 function parseVisitDate(s) {
     if (!s) return null;
     const str = String(s).trim();
@@ -662,9 +711,15 @@ function parseFATRow(row, mapping, index) {
             resolvedBy = 'wardIndex';
             lat = coord.latitude; lon = coord.longitude;
         } else {
-            const cityFallback = getCoordinateFromCity(city);
-            if (cityFallback) { lat = cityFallback.latitude; lon = cityFallback.longitude; resolvedBy = 'cityFallback'; }
-            else { lat = -7.33; lon = 112.73; resolvedBy = 'default'; }
+            // Fallback: pakai koordinat site yang sama dari baris lain (lebih akurat dari kota/default)
+            const siteCoord = siteCityCoordinateIndex.get(`${normalizeKey(city)}||${normalizeKey(site)}`);
+            if (siteCoord && Number.isFinite(siteCoord.latitude) && Number.isFinite(siteCoord.longitude)) {
+                lat = siteCoord.latitude; lon = siteCoord.longitude; resolvedBy = 'siteReference';
+            } else {
+                const cityFallback = getCoordinateFromCity(city);
+                if (cityFallback) { lat = cityFallback.latitude; lon = cityFallback.longitude; resolvedBy = 'cityFallback'; }
+                else { lat = -7.33; lon = 112.73; resolvedBy = 'default'; }
+            }
         }
     }
 
@@ -699,6 +754,8 @@ function fallbackParseCustomerRows(raw) {
     // Coba parser FAT terlebih dahulu (mapping header adaptif)
     const mapping = resolveFATHeaders(raw);
     if (mapping && (mapping.label || mapping.site || mapping.city)) {
+        // Pastikan indeks fallback site selalu mengikuti dataset yang sedang diparse.
+        try { buildSiteCityCoordinateIndex(raw, mapping); } catch (e) { console.warn('buildSiteCityCoordinateIndex failed', e); }
         raw.forEach((row, index) => {
             customers.push(parseFATRow(row, mapping, index));
         });
@@ -1748,6 +1805,7 @@ function parseCustomerData(rowsOrText){
     try {
         if (cityBoundaryIndex.size === 0) buildCityBoundaryIndex();
         buildSiteCoordinateIndex(raw, mapping);
+        try { buildSiteCityCoordinateIndex(raw, mapping); } catch (e) { console.warn('buildSiteCityCoordinateIndex failed', e); }
     } catch (e) {
         console.warn('buildSiteCoordinateIndex failed', e);
     }
@@ -1851,6 +1909,7 @@ function parseCustomerDataAsync(text, options = {}) {
             try {
                 if (cityBoundaryIndex.size === 0) buildCityBoundaryIndex();
                 buildSiteCoordinateIndex(raw, mapping);
+                try { buildSiteCityCoordinateIndex(raw, mapping); } catch (e) { console.warn('buildSiteCityCoordinateIndex failed', e); }
             } catch (e) {
                 console.warn('buildSiteCoordinateIndex failed', e);
             }
@@ -3408,30 +3467,32 @@ function updateFilters() {
    APPLY FILTER
    ========================================================= */
 
-function applyFilters() {
+/* =========================================================
+   SIDEBAR FILTER (dipakai peta & tabel "Seluruh Data FAT")
+   ========================================================= */
 
+function getSidebarFilterState() {
     const normalizeFilterValue = value => {
         const normalized = normalize(value || "").toLowerCase();
         if (normalized.startsWith("semua") || normalized.startsWith("all")) return "";
         return value || "";
     };
+    return {
+        city: normalizeFilterValue(document.getElementById("filter-city")?.value || ""),
+        site: normalizeFilterValue(document.getElementById("filter-site")?.value || ""),
+        portStatus: normalizeFilterValue(document.getElementById("filter-port-status")?.value || ""),
+        keyword: normalize(document.getElementById("search-label")?.value).toLowerCase()
+    };
+}
 
-    const city =
-        normalizeFilterValue(document.getElementById("filter-city")?.value || "");
+function filterCustomersBySidebar(list, state) {
+    const filters = state || getSidebarFilterState();
+    const city = filters.city;
+    const site = filters.site;
+    const portStatus = filters.portStatus;
+    const keyword = filters.keyword;
 
-    const site =
-        normalizeFilterValue(document.getElementById("filter-site")?.value || "");
-
-    const portStatus =
-        normalizeFilterValue(document.getElementById("filter-port-status")?.value || "");
-
-    const keyword =
-        normalize(
-            document.getElementById("search-label")?.value
-        ).toLowerCase();
-
-
-    const filtered = customers.filter(c => {
+    return (Array.isArray(list) ? list : []).filter(c => {
         const cPortStatus = getPortStatusKey(c);
         const labelFatOld = normalize(c.dataFatFull?.["Label FAT OLD"]).toLowerCase();
         const labelFatNew = normalize(c.dataFatFull?.["Label FAT NEW"]).toLowerCase();
@@ -3447,6 +3508,14 @@ function applyFilters() {
                 || normalize(c.site).toLowerCase().includes(keyword))
         );
     });
+}
+
+function applyFilters() {
+
+    const filters = getSidebarFilterState();
+    const keyword = filters.keyword;
+
+    const filtered = filterCustomersBySidebar(customers, filters);
 
 
     // Marker individual per baris; popup tampilkan info FAT per marker
@@ -4086,6 +4155,27 @@ function compareVisitDateDesc(a, b) {
     return String(b.visitDate || '').localeCompare(String(a.visitDate || ''), 'id', { numeric: true, sensitivity: 'base' });
 }
 
+function getDataViewData() {
+    const searchInput = document.getElementById('data-view-search');
+    const query = String(searchInput?.value || '').trim();
+    const filters = getSidebarFilterState();
+
+    let data = filterCustomersBySidebar(Array.isArray(customers) ? customers : [], filters);
+    if (query) {
+        data = data.filter(item => matchesDataViewSearch(item, query));
+    }
+    data = data.slice().sort(compareVisitDateDesc);
+
+    const headers = [...new Set(data.flatMap(item =>
+        Object.keys(item.dataFatFull || {})
+    ))];
+
+    // Export Excel hanya ditawarkan ketika ada filter yang aktif.
+    const filterActive = !!(filters.city || filters.site || filters.portStatus || filters.keyword || query);
+
+    return { data, headers, query, filters, filterActive };
+}
+
 function renderDataView(page = 1) {
     const overlay = document.getElementById('data-view-overlay');
     const tbody = document.getElementById('data-view-tbody');
@@ -4095,20 +4185,14 @@ function renderDataView(page = 1) {
     const tableHead = document.querySelector('#data-view-table thead');
     if (!overlay || !tbody || !pageInfo || !countLabel || !searchInput) return;
  
-    const query = String(searchInput.value || '').trim();
-    let data = Array.isArray(customers) ? customers : [];
-    if (query) {
-        data = data.filter(item => matchesDataViewSearch(item, query));
-    }
-    data = data.slice().sort(compareVisitDateDesc);
+    const viewData = getDataViewData();
+    const data = viewData.data;
  
     const total = data.length;
     const totalPages = Math.max(1, Math.ceil(total / DATA_VIEW_PAGE_SIZE));
     dataViewCurrentPage = Math.min(Math.max(1, page), totalPages);
  
-    const headers = [...new Set(data.flatMap(item =>
-        Object.keys(item.dataFatFull || {})
-    ))];
+    const headers = viewData.headers;
     if (tableHead) {
         tableHead.innerHTML = `<tr>${headers.map(header =>
             `<th style="padding:10px; border-bottom:1px solid #ddd; text-align:left; white-space:nowrap;">${escapeHtml(header)}</th>`
@@ -4133,6 +4217,10 @@ function renderDataView(page = 1) {
         ? 'Tidak ada data yang cocok.'
         : `Menampilkan ${start + 1}-${end} dari ${total} baris`;
     countLabel.textContent = `Total data saat ini: ${total}`;
+
+    // Tombol Export Excel hanya muncul saat filter aktif dan ada baris hasil.
+    const exportBtn = document.getElementById('data-view-export');
+    if (exportBtn) exportBtn.style.display = (viewData.filterActive && total > 0) ? '' : 'none';
  
     const prev = document.getElementById('data-view-prev');
     const next = document.getElementById('data-view-next');
@@ -4174,6 +4262,215 @@ function closeDataView() {
     } catch (e) {}
 }
  
+/* =========================================================
+   EXPORT EXCEL (.xlsx tanpa library eksternal)
+   ========================================================= */
+
+const XLSX_CRC32_TABLE = (function () {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        table[n] = c >>> 0;
+    }
+    return table;
+})();
+
+function crc32Bytes(bytes) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = XLSX_CRC32_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ZIP writer sederhana: semua entry disimpan (method 0 / stored) agar valid
+// untuk .xlsx tanpa perlu kompresi deflate.
+function buildStoredZip(files) {
+    const encoder = new TextEncoder();
+    const chunks = [];
+    const centralChunks = [];
+    let offset = 0;
+    let centralSize = 0;
+
+    const now = new Date();
+    const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xFFFF;
+    const dosDate = ((((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate())) & 0xFFFF;
+
+    const pushU16 = (arr, v) => { arr.push(v & 0xFF, (v >>> 8) & 0xFF); };
+    const pushU32 = (arr, v) => { arr.push(v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF); };
+
+    files.forEach(file => {
+        const nameBytes = encoder.encode(file.name);
+        const data = file.data;
+        const crc = crc32Bytes(data);
+
+        const local = [];
+        pushU32(local, 0x04034b50);
+        pushU16(local, 20);      // version needed to extract
+        pushU16(local, 0x0800);  // general purpose flag: UTF-8 names
+        pushU16(local, 0);       // compression: stored
+        pushU16(local, dosTime);
+        pushU16(local, dosDate);
+        pushU32(local, crc);
+        pushU32(local, data.length);
+        pushU32(local, data.length);
+        pushU16(local, nameBytes.length);
+        pushU16(local, 0);       // extra length
+        chunks.push(new Uint8Array(local), nameBytes, data);
+
+        const central = [];
+        pushU32(central, 0x02014b50);
+        pushU16(central, 20);    // version made by
+        pushU16(central, 20);    // version needed to extract
+        pushU16(central, 0x0800);
+        pushU16(central, 0);
+        pushU16(central, dosTime);
+        pushU16(central, dosDate);
+        pushU32(central, crc);
+        pushU32(central, data.length);
+        pushU32(central, data.length);
+        pushU16(central, nameBytes.length);
+        pushU16(central, 0);     // extra length
+        pushU16(central, 0);     // comment length
+        pushU16(central, 0);     // disk number
+        pushU16(central, 0);     // internal attributes
+        pushU32(central, 0);     // external attributes
+        pushU32(central, offset);
+        centralChunks.push(new Uint8Array(central), nameBytes);
+
+        offset += local.length + nameBytes.length + data.length;
+        centralSize += central.length + nameBytes.length;
+    });
+
+    const eocd = [];
+    pushU32(eocd, 0x06054b50);
+    pushU16(eocd, 0);
+    pushU16(eocd, 0);
+    pushU16(eocd, files.length);
+    pushU16(eocd, files.length);
+    pushU32(eocd, centralSize);
+    pushU32(eocd, offset);
+    pushU16(eocd, 0);
+
+    return new Blob([...chunks, ...centralChunks, new Uint8Array(eocd)], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+}
+
+function excelColumnLabel(index) {
+    let n = Math.max(0, Math.floor(Number(index) || 0));
+    let label = '';
+    do {
+        label = String.fromCharCode(65 + (n % 26)) + label;
+        n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return label;
+}
+
+function escapeXmlText(value) {
+    return String(value ?? '')
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function buildXlsxBlob(rows, sheetName) {
+    const encoder = new TextEncoder();
+    const safeSheetName = (String(sheetName || 'Data').replace(/[[\]:*?/\\]/g, ' ').slice(0, 31) || 'Data');
+
+    const sheetRows = (rows || []).map((row, rowIndex) => {
+        const cells = row.map((value, colIndex) => {
+            const ref = excelColumnLabel(colIndex) + (rowIndex + 1);
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                return `<c r="${ref}"><v>${value}</v></c>`;
+            }
+            return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(value)}</t></is></c>`;
+        }).join('');
+        return `<row r="${rowIndex + 1}">${cells}</row>`;
+    }).join('');
+
+    const files = [
+        {
+            name: '[Content_Types].xml',
+            data: encoder.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+                '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+                '<Default Extension="xml" ContentType="application/xml"/>' +
+                '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+                '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+                '</Types>')
+        },
+        {
+            name: '_rels/.rels',
+            data: encoder.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+                '</Relationships>')
+        },
+        {
+            name: 'xl/workbook.xml',
+            data: encoder.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+                `<sheets><sheet name="${escapeXmlText(safeSheetName)}" sheetId="1" r:id="rId1"/></sheets>` +
+                '</workbook>')
+        },
+        {
+            name: 'xl/_rels/workbook.xml.rels',
+            data: encoder.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+                '</Relationships>')
+        },
+        {
+            name: 'xl/worksheets/sheet1.xml',
+            data: encoder.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+                `<sheetData>${sheetRows}</sheetData>` +
+                '</worksheet>')
+        }
+    ];
+
+    return buildStoredZip(files);
+}
+
+function exportDataViewToExcel() {
+    try {
+        const viewData = getDataViewData();
+        const data = viewData.data;
+        const headers = viewData.headers;
+
+        if (!headers.length || !data.length) {
+            alert('Tidak ada data untuk diexport.');
+            return;
+        }
+
+        const rows = [headers.slice()];
+        data.forEach(item => {
+            const raw = item.dataFatFull || {};
+            rows.push(headers.map(header => raw[header] ?? ''));
+        });
+
+        const blob = buildXlsxBlob(rows, 'Seluruh Data FAT');
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        const filename = `Seluruh-Data-FAT_${stamp}.xlsx`;
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+        console.error('exportDataViewToExcel gagal', e);
+        alert('Export Excel gagal. Silakan coba lagi.');
+    }
+}
+
 function setupDataView() {
     const overlay = document.getElementById('data-view-overlay');
     const closeBtn = document.getElementById('data-view-close');
@@ -4202,6 +4499,11 @@ function setupDataView() {
        searchInput.addEventListener('input', function() {
            renderDataView(1);
        });
+   }
+
+   const exportBtn = document.getElementById('data-view-export');
+   if (exportBtn) {
+       exportBtn.addEventListener('click', exportDataViewToExcel);
    }
 
    // MutationObserver: hide geolocate-like floating buttons whenever data view overlay is shown
@@ -4235,7 +4537,7 @@ function setupDataView() {
                    try {
                        // Never hide pagination controls inside the data view
                        const lid = (el.id || '').toString();
-                       if (lid === 'data-view-prev' || lid === 'data-view-next' || lid === 'data-view-close') continue;
+                       if (lid === 'data-view-prev' || lid === 'data-view-next' || lid === 'data-view-close' || lid === 'data-view-export') continue;
 
                        const txt = (el.textContent || '').trim();
                        const id = (el.id || '').toString().toLowerCase();
@@ -4371,7 +4673,8 @@ async function loadXlsxArrayBuffer(url) {
     }
     let lastError = null;
     try {
-        const response = await fetch(url, { cache: 'force-cache' });
+        // no-cache: paksa revalidasi ke server supaya file data terbaru langsung terpakai.
+        const response = await fetch(url, { cache: 'no-cache' });
         if (!response.ok) {
             throw new Error('Data gagal dibaca. HTTP ' + response.status);
         }
