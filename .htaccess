@@ -1,0 +1,8 @@
+# Selalu validasi ke server (revalidate) untuk file yang sering berubah,
+# supaya file data yang diganti / editan tampil langsung setelah reload biasa.
+# Dijaga IfModule: jika mod_headers tidak aktif, file ini diabaikan (aman).
+<IfModule mod_headers.c>
+    <FilesMatch "\.(html|htm|js|css|xlsx|csv|php)$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>
