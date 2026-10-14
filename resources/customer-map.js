@@ -10,7 +10,7 @@ const DATA_URL = "./data/Data FAT Full.xlsx?v=20261012.1";
 const ASIANET_SURABAYA_FOCUS = {
     longitude: 112.772278,
     latitude: -7.327206,
-    zoom: 25
+    zoom: 21
 };
 // Debug: when true, markers are rendered as large bright red circles to aid visibility while debugging
 // Toggle to true to force-visible markers
