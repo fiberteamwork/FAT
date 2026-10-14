@@ -102,10 +102,10 @@ const STATUS_CONFIG = {
 
 const PORT_STATUS_CONFIG = {
     full: { label: "Port Full🔴", color: "#ef4444" },
-    available: { label: "Port Available🟢", color: "#22c55e" },
+    available: { label: "Available🟢", color: "#22c55e" },
     noData: { label: "Belum Ada Data🟤", color: "#8b5e3c" },
-    needCheck: { label: "Need Check Input FAT🟠", color: "#f97316" },
-    unavailable: { label: "Port UnAvailable⚫", color: "#111827" },
+    needCheck: { label: "Need Check🟠", color: "#f97316" },
+    unavailable: { label: "UnAvailable⚫", color: "#111827" },
     partial: { label: "Partial🟡", color: "#f59e0b" },
     unknown: { label: "Tidak diketahui⚪", color: "#f9fafd" }
 };
@@ -2074,6 +2074,51 @@ function getCustomersInMapViewport(data) {
     });
 }
 
+function focusMapOnCustomers(data) {
+    try {
+        if (typeof map === 'undefined' || !map || !map.getView) return;
+        const view = map.getView();
+        if (!view) return;
+
+        const coords = [];
+        (Array.isArray(data) ? data : []).forEach(customer => {
+            const lat = Number(customer && customer.latitude);
+            const lon = Number(customer && customer.longitude);
+            if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) > 1e-6 && Math.abs(lon) > 1e-6) {
+                coords.push(ol.proj.fromLonLat([lon, lat]));
+            }
+        });
+        if (!coords.length) return;
+
+        const size = map.getSize();
+        const hasSize = !!(size && size[0] && size[1]);
+
+        // Satu hasil: langsung animasikan ke marker tersebut.
+        if (coords.length === 1 || !hasSize) {
+            view.animate({ center: coords[0], zoom: Math.max(view.getZoom() || 12, 16), duration: 400 });
+            return;
+        }
+
+        let minX = coords[0][0], minY = coords[0][1], maxX = minX, maxY = minY;
+        coords.forEach(([x, y]) => {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        });
+
+        // Banyak hasil: fit seluruh marker ke dalam viewport.
+        view.fit([minX, minY, maxX, maxY], {
+            size,
+            padding: [80, 80, 80, 80],
+            maxZoom: 17,
+            duration: 400
+        });
+    } catch (e) {
+        console.warn('focusMapOnCustomers failed', e);
+    }
+}
+
 function scheduleViewportCustomerRender() {
     if (!activeMapCustomers.length || mapViewportRenderTimer !== null) return;
     mapViewportRenderTimer = setTimeout(() => {
@@ -2096,7 +2141,9 @@ function drawCustomers(data, options){
     activeMapCustomers = Array.isArray(data) ? data : [];
     activeMapDrawOptions = options || {};
     const totalDataCount = activeMapCustomers.length;
-    data = getCustomersInMapViewport(activeMapCustomers);
+    data = (activeMapDrawOptions && activeMapDrawOptions.ignoreViewport)
+        ? activeMapCustomers
+        : getCustomersInMapViewport(activeMapCustomers);
     console.log('[DRAW] viewport rows=', data.length, 'of', totalDataCount);
 
     if (customerDrawTimeout) {
@@ -3404,7 +3451,13 @@ function applyFilters() {
 
     // Marker individual per baris; popup tampilkan info FAT per marker
     // Render every FAT record; each marker popup still shows only its clicked ID.
-    drawCustomers(filtered, { expandGroups: true });
+    if (keyword && filtered.length > 0) {
+        // Pencarian FAT/ODP: langsung fokuskan peta ke arah marker hasil pencarian.
+        focusMapOnCustomers(filtered);
+        drawCustomers(filtered, { expandGroups: true, ignoreViewport: true });
+    } else {
+        drawCustomers(filtered, { expandGroups: true });
+    }
 
     updateSummary(filtered);
 
