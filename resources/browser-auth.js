@@ -34,13 +34,15 @@
             'resources/Autolinker.min.js',
             'resources/qgis2web.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'resources/customer-map.js?v=20261012.16'
+            'resources/customer-map.js?v=20261022.4'
         ];
 
         const loadingMessage = byId('map-loading-message');
         if (loadingMessage) loadingMessage.textContent = 'Memuat komponen peta...';
+        // no-cache: selalu validasi ke server dulu (304 jika file tidak berubah),
+        // agar file data yang diganti langsung terbaca tanpa hard refresh.
         window.customerDataPreload = fetch('./data/Data FAT Full.xlsx?v=20261012.1', {
-            cache: 'force-cache'
+            cache: 'no-cache'
         }).then(response => {
             if (!response.ok) throw new Error('Data FAT gagal dimuat. HTTP ' + response.status);
             return response.arrayBuffer();
