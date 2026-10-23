@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Uji Dropdown Status Port + Diagram ODC</title>
+<style>
+body { font-family: monospace; padding: 12px; background: #111; color: #eee; }
+pre { white-space: pre-wrap; word-break: break-all; }
+.pass { color: #4ade80; }
+.fail { color: #f87171; }
+</style>
+</head>
+<body>
+<h3>Uji deteksi ODC, dropdown Status Port, &amp; pemisahan diagram FAT/ODC</h3>
+<div id="chart-area" style="background:#fff; color:#000; padding:8px; border-radius:6px; max-width:420px;">
+    <div id="legend"></div>
+    <div style="position:relative; width:100%; height:200px;"><canvas id="ward-chart"></canvas></div>
+    <div id="odc-chart-panel">
+        <div style="font-weight:bold; margin:8px 0;">Jumlah ODC</div>
+        <div id="odc-legend"></div>
+        <div style="position:relative; width:100%; height:160px;"><canvas id="odc-chart"></canvas></div>
+    </div>
+</div>
+<pre id="out">loading...</pre>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Blokir auto-start startCustomerMap (menunggu auth tak berujung) agar loadData tidak jalan.
+window.dashboardAuthReady = new Promise(function () {});
+</script>
+<script src="./resources/customer-map.js?v=20261022.4"></script>
+<script>
+(function () {
+    const out = document.getElementById('out');
+    const lines = [];
+    let pass = 0, fail = 0;
+    const ok = (name, cond, detail) => {
+        if (cond) { pass++; lines.push('<span class="pass">PASS</span> ' + name); }
+        else { fail++; lines.push('<span class="fail">FAIL</span> ' + name + (detail !== undefined ? ' => ' + detail : '')); }
+    };
+
+    // ===== 1. Deteksi kunci status per nilai Status FAT asli dari xlsx =====
+    const EXPECT = [
+        { status: 'Port Available🟢',      key: 'available' },
+        { status: 'Port Full🔴',           key: 'full' },
+        { status: 'Belum Ada Data🟤',      key: 'noData' },
+        { status: 'Port ODC Available\u{1F4D7}',  key: 'odcAvailable' },
+        { status: 'Need Check Input FAT🟠', key: 'needCheck' },
+        { status: 'Port ODC Full📕',       key: 'odcFull' },
+        { status: 'Port Unavailable⚫',    key: 'unavailable' },
+        { status: '',                      key: 'unknown' }
+    ];
+    EXPECT.forEach(e => {
+        const k = getPortStatusKey({ status: e.status });
+        ok('getPortStatusKey("' + e.status + '") = ' + e.key, k === e.key, k);
+    });
+
+    // pastikan "unavailable" TIDAK tertangkap sebagai odcAvailable (mengandung kata "available")
+    ok('unavailable tidak jadi odcAvailable', getPortStatusKey({ status: 'Port Unavailable⚫' }) === 'unavailable', getPortStatusKey({ status: 'Port Unavailable⚫' }));
+    // pastikan FAT biasa tidak tertangkap ODC
+    ok('Port Available🟢 bukan odcAvailable', getPortStatusKey({ status: 'Port Available🟢' }) !== 'odcAvailable', getPortStatusKey({ status: 'Port Available🟢' }));
+    ok('Port Full🔴 bukan odcFull', getPortStatusKey({ status: 'Port Full🔴' }) !== 'odcFull', getPortStatusKey({ status: 'Port Full🔴' }));
+
+    // ===== 2. Konfigurasi & dropdown =====
+    ok('ODC_STATUS_KEYS = [odcAvailable, odcFull]', JSON.stringify(ODC_STATUS_KEYS) === JSON.stringify(['odcAvailable', 'odcFull']), JSON.stringify(ODC_STATUS_KEYS));
+    ok('dropdown punya opsi odcAvailable', PORT_STATUS_FILTER_KEYS.includes('odcAvailable'), JSON.stringify(PORT_STATUS_FILTER_KEYS));
+    ok('dropdown punya opsi odcFull', PORT_STATUS_FILTER_KEYS.includes('odcFull'), JSON.stringify(PORT_STATUS_FILTER_KEYS));
+    ok('label odcAvailable sesuai data xlsx', PORT_STATUS_CONFIG.odcAvailable.label === 'Port ODC Available\u{1F4D7}', PORT_STATUS_CONFIG.odcAvailable.label);
+    ok('label odcFull sesuai data xlsx', PORT_STATUS_CONFIG.odcFull.label === 'Port ODC Full📕', PORT_STATUS_CONFIG.odcFull.label);
+    ok('semua key di PORT_STATUS_FILTER_KEYS punya config', PORT_STATUS_FILTER_KEYS.every(k => !!PORT_STATUS_CONFIG[k]), PORT_STATUS_FILTER_KEYS.filter(k => !PORT_STATUS_CONFIG[k]).join(','));
+
+    // ===== 3. Filter sidebar memisahkan ODC vs FAT =====
+    const sample = EXPECT.map((e, i) => ({ id: 'R' + i, status: e.status, city: 'Kota Surabaya', latitude: -7.3, longitude: 112.7 }));
+    const odcOnly = filterCustomersBySidebar(sample, { portStatus: 'odcFull' });
+    ok('filter portStatus=odcFull hanya menghasilkan 1 baris', odcOnly.length === 1, odcOnly.length);
+    ok('filter portStatus=odcFull menghasilkan status Port ODC Full', odcOnly.length === 1 && odcOnly[0].status === 'Port ODC Full📕', odcOnly.map(c => c.status).join('|'));
+    const availOnly = filterCustomersBySidebar(sample, { portStatus: 'available' });
+    ok('filter portStatus=available tidak ikut ODC', availOnly.length === 1 && availOnly[0].status === 'Port Available🟢', availOnly.map(c => c.status).join('|'));
+
+    // ===== 4. Chart terpisah =====
+    updateChart(sample);
+    updateODCChart(sample);
+
+    const wardLabels = wardChart ? wardChart.data.labels.slice() : [];
+    const odcLabels = (typeof odcChart !== 'undefined' && odcChart) ? odcChart.data.labels.slice() : [];
+
+    ok('chart FAT tidak memuat label ODC', wardLabels.every(l => String(l).indexOf('ODC') === -1), JSON.stringify(wardLabels));
+    ok('chart FAT berisi 6 kategori non-ODC (5 status + tidak diketahui)', wardLabels.length === 6, JSON.stringify(wardLabels));
+    ok('chart ODC hanya berisi label ODC', odcLabels.length === 2 && odcLabels.every(l => String(l).indexOf('ODC') !== -1), JSON.stringify(odcLabels));
+
+    const wardTotal = wardChart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+    const odcTotal = odcChart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+    ok('total chart FAT = 6 (semua non-ODC)', wardTotal === 6, wardTotal);
+    ok('total chart ODC = 2 (hanya ODC)', odcTotal === 2, odcTotal);
+    ok('legend ODC terisi 2 baris', (document.getElementById('odc-legend').innerHTML.match(/legend-item/g) || []).length === 2, document.getElementById('odc-legend').innerHTML.length);
+
+    // panel ODC tampil karena ada data ODC
+    ok('panel ODC tampil saat ada data ODC', document.getElementById('odc-chart-panel').style.display !== 'none', document.getElementById('odc-chart-panel').style.display);
+
+    // ===== 5. Panel ODC disembunyikan bila tanpa ODC =====
+    const noOdc = sample.filter(c => getPortStatusKey(c) !== 'odcAvailable' && getPortStatusKey(c) !== 'odcFull');
+    updateChart(noOdc);
+    updateODCChart(noOdc);
+    ok('panel ODC disembunyikan saat tanpa data ODC', document.getElementById('odc-chart-panel').style.display === 'none', document.getElementById('odc-chart-panel').style.display);
+    ok('chart FAT tetap jalan tanpa ODC', wardChart && wardChart.data.labels.length === 6, wardChart ? JSON.stringify(wardChart.data.labels) : 'null');
+
+    // ===== 6. Marker ODC tetap segitiga (dari config symbol) =====
+    ok('symbol odc tetap availableBook (segitiga)', getFATSymbolKey({ status: 'Port ODC Available\u{1F4D7}' }) === 'availableBook', getFATSymbolKey({ status: 'Port ODC Available\u{1F4D7}' }));
+    ok('symbol odc tetap fullBook (segitiga)', getFATSymbolKey({ status: 'Port ODC Full📕' }) === 'fullBook', getFATSymbolKey({ status: 'Port ODC Full📕' }));
+
+    lines.push('');
+    lines.push('<b>' + (fail === 0 ? 'SEMUA LULUS' : fail + ' GAGAL') + '</b> (' + pass + ' pass / ' + fail + ' fail)');
+    out.innerHTML = lines.join('\n');
+})();
+</script>
+<script>
+// ===== 7. Verifikasi chart dengan data xlsx ASLI (tanpa login) =====
+(async function () {
+    const out2 = document.getElementById('out');
+    const lines2 = ['--- verifikasi data asli: ./data/Data FAT Full.xlsx ---'];
+    let pass2 = 0, fail2 = 0;
+    const ok2 = (name, cond, detail) => {
+        if (cond) { pass2++; lines2.push('<span class="pass">PASS</span> ' + name); }
+        else { fail2++; lines2.push('<span class="fail">FAIL</span> ' + name + (detail !== undefined ? ' => ' + detail : '')); }
+    };
+    try {
+        if (!window.XLSXLite) {
+            await new Promise((res, rej) => { const s = document.createElement('script'); s.src = './resources/xlsx-lite.js'; s.onload = res; s.onerror = () => rej(new Error('gagal memuat xlsx-lite.js')); document.head.appendChild(s); });
+        }
+        const buf = await (await fetch('./data/Data FAT Full.xlsx')).arrayBuffer();
+        const parsed = await XLSXLite.read(buf);
+        const rows = XLSXLite.sheetToObjects(parsed.sheets[parsed.sheetNames[0]]);
+        ok2('rows xlsx terbaca (> 40000)', rows.length > 40000, rows.length);
+
+        // Klasifikasi INDEPENDEN berbasis kodepoin emoji akhir + teks "odc" (tidak memakai fungsi customer-map)
+        const EMOJI = { '1F4D5': 'odcFull', '1F4D7': 'odcAvailable', '1F534': 'full', '1F7E2': 'available', '1F7E0': 'needCheck', '1F7E4': 'noData', '26AB': 'unavailable' };
+        const expected = {};
+        rows.forEach(r => {
+            const raw = String(r['Status FAT'] || '').trim();
+            const s = raw.toLowerCase();
+            const arr = Array.from(raw);
+            const last = arr.length ? arr[arr.length - 1].codePointAt(0).toString(16).toUpperCase() : '';
+            let key;
+            if (s.indexOf('odc') !== -1) key = s.indexOf('full') !== -1 ? 'odcFull' : 'odcAvailable';
+            else if (EMOJI[last]) key = EMOJI[last];
+            else key = 'unknown';
+            expected[key] = (expected[key] || 0) + 1;
+        });
+
+        const asCustomers = rows.map(r => ({ dataFatFull: r, status: r['Status FAT'] }));
+        updateChart(asCustomers);
+        updateODCChart(asCustomers);
+
+        const labelToKey = l => Object.keys(PORT_STATUS_CONFIG).find(k => PORT_STATUS_CONFIG[k].label === l);
+        const wardCounts = {}, odcCounts = {};
+        wardChart.data.labels.forEach((l, i) => { wardCounts[labelToKey(l)] = wardChart.data.datasets[0].data[i]; });
+        odcChart.data.labels.forEach((l, i) => { odcCounts[labelToKey(l)] = odcChart.data.datasets[0].data[i]; });
+
+        Object.keys(expected).forEach(k => {
+            const chartCounts = ODC_STATUS_KEYS.includes(k) ? odcCounts : wardCounts;
+            ok2('count ' + k + ' = ' + expected[k] + ' (independen)', chartCounts[k] === expected[k], chartCounts[k]);
+        });
+        const wardTotal = Object.values(wardCounts).reduce((a, b) => a + b, 0);
+        const odcTotal = Object.values(odcCounts).reduce((a, b) => a + b, 0);
+        ok2('wardTotal + odcTotal = jumlah baris xlsx', wardTotal + odcTotal === rows.length, wardTotal + ' + ' + odcTotal + ' vs ' + rows.length);
+        ok2('chart FAT asli tanpa label ODC', wardChart.data.labels.every(l => String(l).indexOf('ODC') === -1), JSON.stringify(wardChart.data.labels));
+        ok2('chart ODC asli hanya label ODC', odcChart.data.labels.length > 0 && odcChart.data.labels.every(l => String(l).indexOf('ODC') !== -1), JSON.stringify(odcChart.data.labels));
+        ok2('panel ODC tampil pada data asli', document.getElementById('odc-chart-panel').style.display !== 'none', document.getElementById('odc-chart-panel').style.display);
+        lines2.push('');
+        lines2.push('<b>' + (fail2 === 0 ? 'DATA ASLI LULUS' : fail2 + ' GAGAL (data asli)') + '</b> (' + pass2 + ' pass / ' + fail2 + ' fail)');
+    } catch (e) {
+        lines2.push('<span class="fail">ERROR</span> ' + (e && e.message ? e.message : e));
+        fail2++;
+    }
+    out2.innerHTML = out2.innerHTML + '\n' + lines2.join('\n');
+    window.__realDone = true;
+})();
+</script>
+</body>
+</html>
