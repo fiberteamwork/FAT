@@ -194,6 +194,21 @@
     height: 100% !important;
 }
 
+#odc-chart-panel {
+    margin-top: 18px;
+}
+
+#odc-chart-wrapper {
+    position: relative;
+    width: 100%;
+    height: 180px;
+}
+
+#odc-chart {
+    width: 100%;
+    height: 100% !important;
+}
+
 #legend {
     margin-top: 10px;
 }
@@ -656,6 +671,16 @@ body:not(.auth-ready) #data-view-overlay {
     <div id="legend"></div>
     <div id="ward-chart-wrapper">
         <canvas id="ward-chart"></canvas>
+    </div>
+
+    <div id="odc-chart-panel">
+        <div class="chart-title">
+            <center>Jumlah ODC berdasarkan <br>Status ODC</center>
+        </div>
+        <div id="odc-legend"></div>
+        <div id="odc-chart-wrapper">
+            <canvas id="odc-chart"></canvas>
+        </div>
     </div>
 <br>
 		<div>&copy; 2026 <b>SBY regional | <font color="blue">East regional</font></b></div><br>
