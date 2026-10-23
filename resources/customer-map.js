@@ -4,12 +4,12 @@
    Separator : ;
    ========================================================= */
 
-console.log('[CUSTOMER_MAP] loaded version 20260924.1 (FAT XLSX)');
+console.log('[CUSTOMER_MAP] loaded version 20261022.4 (FAT XLSX - dropdown Status Port + diagram ODC terpisah)');
 
 const DATA_URL = "./data/Data FAT Full.xlsx?v=20261012.1";
 const ASIANET_SURABAYA_FOCUS = {
-    longitude: 112.772276, 
-    latitude: -7.327158,
+    longitude: 112.77226981789323,
+    latitude: -7.327167247734099,
     zoom: 22
 };
 // Debug: when true, markers are rendered as large bright red circles to aid visibility while debugging
@@ -28,6 +28,7 @@ let activeMapDrawOptions = {};
 let mapViewportRenderTimer = null;
 let filterApplyTimer = null;
 let wardChart = null;
+let odcChart = null;
 let customerDrawVersion = 0;
 let customerDrawTimeout = null;
 let initialMapFocusApplied = false;
@@ -105,12 +106,17 @@ const PORT_STATUS_CONFIG = {
     available: { label: "Port Available🟢", color: "#22c55e" },
     noData: { label: "Belum Ada Data🟤", color: "#8b5e3c" },
     needCheck: { label: "Need Check Input FAT🟠", color: "#f97316" },
-    unavailable: { label: "Port UnAvailable⚫", color: "#111827" },
+    unavailable: { label: "Port Unavailable⚫", color: "#111827" },
+    odcAvailable: { label: "Port ODC Available📗", color: "#16a34a" },
+    odcFull: { label: "Port ODC Full📕", color: "#dc2626" },
     partial: { label: "Partial🟡", color: "#f59e0b" },
     unknown: { label: "Tidak diketahui⚪", color: "#f9fafd" }
 };
 
-const PORT_STATUS_FILTER_KEYS = ["full", "available", "noData", "needCheck", "unavailable"];
+// Kategori yang hanya muncul untuk record ODC (dipisah dari chart FAT)
+const ODC_STATUS_KEYS = ["odcAvailable", "odcFull"];
+
+const PORT_STATUS_FILTER_KEYS = ["full", "available", "noData", "needCheck", "unavailable", "odcAvailable", "odcFull"];
 
 function getPortStatusKey(customer) {
     const explicit = String(
@@ -122,6 +128,10 @@ function getPortStatusKey(customer) {
     ).trim().toLowerCase();
 
     if (explicit.includes("unavailable")) return "unavailable";
+    // Status ODC dicek sebelum "full"/"available" karena teksnya juga mengandung kata itu
+    // (mis. "Port ODC Available📗") sehingga harus dipisah dari FAT biasa.
+    if (explicit.includes("odc") && (explicit.includes("avaible") || explicit.includes("available") || explicit.includes("idle"))) return "odcAvailable";
+    if (explicit.includes("odc") && (explicit.includes("full") || explicit.includes("penuh"))) return "odcFull";
     if (explicit.includes("belum ada data") || explicit.includes("no data")) return "noData";
     if (explicit.includes("need check") || explicit.includes("perlu pengecekan")) return "needCheck";
     if (explicit.includes("full") || explicit.includes("penuh")) return "full";
@@ -139,6 +149,79 @@ function getPortStatusKey(customer) {
 
 function getPortStatusColor(customer) {
     return PORT_STATUS_CONFIG[getPortStatusKey(customer)].color;
+}
+
+/* =========================================================
+   SYMBOL STATUS FAT (dari kolom "Status FAT" Data FAT Full.xlsx)
+   Emoji di ujung nilai menentukan bentuk & warna marker:
+   📗/📕 (buku) -> segitiga, 🟢🔴🟠🟤⚫ (lingkaran) -> lingkaran.
+   ========================================================= */
+
+const FAT_STATUS_EMOJI = {
+    "📗": "availableBook",
+    "📕": "fullBook",
+    "🟢": "available",
+    "🔴": "full",
+    "🟠": "needCheck",
+    "🟤": "noData",
+    "⚫": "unavailable"
+};
+
+const FAT_STATUS_SYMBOL_CONFIG = {
+    availableBook: { label: "Port Available📗", color: "#16a34a", shape: "triangle" },
+    fullBook:      { label: "Port Full📕", color: "#dc2626", shape: "triangle" },
+    available:     { label: "Port Available🟢", color: "#22c55e", shape: "circle" },
+    full:          { label: "Port Full🔴", color: "#ef4444", shape: "circle" },
+    needCheck:     { label: "Need Check Input FAT🟠", color: "#f97316", shape: "circle" },
+    noData:        { label: "Belum Ada Data🟤", color: "#8b5e3c", shape: "circle" },
+    unavailable:   { label: "Port Unavailable⚫", color: "#111827", shape: "circle" },
+    unknown:       { label: "Tidak diketahui⚪", color: "#9ca3af", shape: "circle" }
+};
+
+// Kunci symbol Status FAT untuk satu customer (emoji dulu, fallback teks dasar)
+function getFATSymbolKey(customer) {
+    const raw = String(
+        customer?.status ||
+        customer?.dataFatFull?.["Status FAT"] ||
+        ""
+    ).trim();
+    if (!raw) return "unknown";
+
+    for (const emoji of Object.keys(FAT_STATUS_EMOJI)) {
+        if (raw.includes(emoji)) return FAT_STATUS_EMOJI[emoji];
+    }
+
+    // Fallback bila emoji tidak ikut terbaca dari file
+    const s = raw.toLowerCase();
+    if (s.includes("unavailable")) return "unavailable";
+    if (s.includes("belum ada data") || s.includes("no data")) return "noData";
+    if (s.includes("need check") || s.includes("perlu pengecekan")) return "needCheck";
+    if (s.includes("available") || s.includes("avaible") || s.includes("idle")) return "available";
+    if (s.includes("full") || s.includes("penuh")) return "full";
+    return "unknown";
+}
+
+function getFATSymbolConfig(customer) {
+    return FAT_STATUS_SYMBOL_CONFIG[getFATSymbolKey(customer)] || FAT_STATUS_SYMBOL_CONFIG.unknown;
+}
+
+// Image marker sesuai symbol: segitiga (buku) atau lingkaran
+function createFATSymbolImage(config, radius) {
+    const fill = new ol.style.Fill({ color: config.color });
+    const stroke = new ol.style.Stroke({ color: "#ffffff", width: 2 });
+    if (config.shape === "triangle") {
+        // Lebar segitiga (sisi = radius * akar3) disamakan dengan diameter lingkaran (2 * radius),
+        // sehingga radius disetel radius * 2 / akar3 (radius 7 -> 8, lebar ~13.9px ≈ diameter 14px).
+        // angle 0 -> segitiga menghadap ke atas.
+        return new ol.style.RegularShape({
+            points: 3,
+            radius: Math.round(radius * 2 / Math.sqrt(3)),
+            angle: 0,
+            fill,
+            stroke
+        });
+    }
+    return new ol.style.Circle({ radius, fill, stroke });
 }
 
 
@@ -1977,22 +2060,12 @@ function createMarkerStyle(customer) {
         });
     }
 
+    // Bentuk & warna marker mengikuti symbol Status FAT
+    const fatConfig = getFATSymbolConfig(customer);
+
     return new ol.style.Style({
 
-        image: new ol.style.Circle({
-
-            radius: 7,
-
-            fill: new ol.style.Fill({
-                color: getPortStatusColor(customer)
-            }),
-
-            stroke: new ol.style.Stroke({
-                color: "#ffffff",
-                width: 2
-            })
-
-        })
+        image: createFATSymbolImage(fatConfig, 7)
 
     });
 
@@ -2044,17 +2117,21 @@ function createCustomerLayer() {
     if (!window._customer_style_cache) window._customer_style_cache = {};
     const customerStyleFunction = function(feature) {
         const customer = feature.get('customer') || {};
-        const key = getPortStatusKey(customer);
-        if (window._customer_style_cache[key]) return window._customer_style_cache[key];
-        // Create a single shared style per status
+        // Bentuk & warna marker mengikuti symbol Status FAT (📗📕=segitiga, 🟢🔴🟠🟤⚫=lingkaran)
+        const key = getFATSymbolKey(customer);
+        const cacheKey = 'fatSymbol:' + key;
+        if (window._customer_style_cache[cacheKey]) return window._customer_style_cache[cacheKey];
+        // Create a single shared style per symbol
         const st = new ol.style.Style({
-            image: new ol.style.Circle({
-                radius: (typeof DEBUG_HIGHLIGHT_MARKERS !== 'undefined' && DEBUG_HIGHLIGHT_MARKERS) ? 12 : 7,
-                fill: new ol.style.Fill({ color: (typeof DEBUG_HIGHLIGHT_MARKERS !== 'undefined' && DEBUG_HIGHLIGHT_MARKERS) ? 'rgba(220,20,60,0.95)' : PORT_STATUS_CONFIG[key].color }),
-                stroke: new ol.style.Stroke({ color: (typeof DEBUG_HIGHLIGHT_MARKERS !== 'undefined' && DEBUG_HIGHLIGHT_MARKERS) ? '#000' : '#ffffff', width: 2 })
-            })
+            image: (typeof DEBUG_HIGHLIGHT_MARKERS !== 'undefined' && DEBUG_HIGHLIGHT_MARKERS)
+                ? new ol.style.Circle({
+                    radius: 12,
+                    fill: new ol.style.Fill({ color: 'rgba(220,20,60,0.95)' }),
+                    stroke: new ol.style.Stroke({ color: '#000', width: 2 })
+                })
+                : createFATSymbolImage(FAT_STATUS_SYMBOL_CONFIG[key] || FAT_STATUS_SYMBOL_CONFIG.unknown, 7)
         });
-        window._customer_style_cache[key] = st;
+        window._customer_style_cache[cacheKey] = st;
         return st;
     };
 
@@ -3532,6 +3609,8 @@ function applyFilters() {
 
     updateChart(filtered);
 
+    updateODCChart(filtered);
+
 }
 
 /* =========================================================
@@ -3570,8 +3649,9 @@ function updateChart(data) {
         const key = getPortStatusKey(customer);
         statusCounts.set(key, (statusCounts.get(key) || 0) + 1);
     });
+    // Chart FAT: hanya status non-ODC (ODC punya diagram terpisah)
     const statusKeys = Object.keys(PORT_STATUS_CONFIG)
-        .filter(key => statusCounts.has(key));
+        .filter(key => !ODC_STATUS_KEYS.includes(key) && statusCounts.has(key));
     const labels = statusKeys.map(key => PORT_STATUS_CONFIG[key].label);
     const counts = statusKeys.map(key => statusCounts.get(key));
     const colors = statusKeys.map(key => PORT_STATUS_CONFIG[key].color);
@@ -3639,6 +3719,91 @@ function updateChart(data) {
         `).join('');
     }
 
+}
+
+/* =========================================================
+   CHART ODC (terpisah dari chart FAT)
+   ========================================================= */
+
+function updateODCChart(data) {
+    const statusCounts = new Map();
+    (Array.isArray(data) ? data : []).forEach(customer => {
+        const key = getPortStatusKey(customer);
+        if (!ODC_STATUS_KEYS.includes(key)) return;
+        statusCounts.set(key, (statusCounts.get(key) || 0) + 1);
+    });
+
+    const statusKeys = ODC_STATUS_KEYS.filter(key => statusCounts.has(key));
+    const labels = statusKeys.map(key => PORT_STATUS_CONFIG[key].label);
+    const counts = statusKeys.map(key => statusCounts.get(key));
+    const colors = statusKeys.map(key => PORT_STATUS_CONFIG[key].color);
+
+    const canvas = document.getElementById("odc-chart");
+    const legend = document.getElementById("odc-legend");
+    const totalODC = counts.reduce((sum, count) => sum + count, 0);
+
+    // Sembunyikan panel ODC bila tidak ada record ODC pada data aktif
+    const panel = document.getElementById("odc-chart-panel");
+    if (panel) panel.style.display = totalODC > 0 ? "" : "none";
+
+    if (!canvas || typeof Chart !== "function")
+        return;
+
+    if (odcChart)
+        odcChart.destroy();
+
+    if (totalODC === 0) {
+        if (legend) legend.innerHTML = "";
+        return;
+    }
+
+    odcChart = new Chart(
+        canvas,
+        {
+            type: "doughnut",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Jumlah ODC',
+                        data: counts,
+                        backgroundColor: colors,
+                        borderColor: '#ffffff',
+                        borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: {
+                    padding: { top: 8, right: 8, bottom: 12, left: 8 }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: context => {
+                                const percentage = totalODC ? (context.raw / totalODC * 100).toFixed(1) : '0.0';
+                                return `${context.label}: ${context.raw} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    );
+
+    if (legend) {
+        legend.innerHTML = statusKeys.map((key, index) => `
+            <div class="legend-item">
+                <span class="legend-color" style="background:${colors[index]}"></span>
+                <span>${escapeHtml(labels[index])}: ${counts[index]}</span>
+            </div>
+        `).join('');
+    }
 }
 
 
@@ -4844,8 +5009,9 @@ async function loadData(input = null) {
         setupMapClick();
         createCustomerLayer();
         drawCustomers(customers, { expandGroups: true });
-        updateSummary(customers);
-        updateChart(customers);
+    updateSummary(customers);
+    updateChart(customers);
+    updateODCChart(customers);
         window.customerMapReady = true;
         if (loadingStatus) loadingStatus.hidden = true;
 
