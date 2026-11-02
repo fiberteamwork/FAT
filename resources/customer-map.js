@@ -4,7 +4,7 @@
    Separator : ;
    ========================================================= */
 
-console.log('[CUSTOMER_MAP] loaded version 20261022.4 (FAT XLSX - dropdown Status Port + diagram ODC terpisah)');
+console.log('[CUSTOMER_MAP] loaded version 20261102.1 (FAT/FDT XLSX)');
 
 const DATA_URL = "./data/Data FAT Full.xlsx?v=20261012.1";
 const ASIANET_SURABAYA_FOCUS = {
@@ -121,6 +121,7 @@ const PORT_STATUS_FILTER_KEYS = ["full", "available", "noData", "needCheck", "un
 function getPortStatusKey(customer) {
     const explicit = String(
         customer?.dataFatFull?.["Status FAT"] ??
+        customer?.dataFatFull?.["Status FDT"] ??
         customer?.dataFatFull?.["Status Port"] ??
         customer?.statusPort ??
         customer?.status ??
@@ -183,6 +184,7 @@ function getFATSymbolKey(customer) {
     const raw = String(
         customer?.status ||
         customer?.dataFatFull?.["Status FAT"] ||
+        customer?.dataFatFull?.["Status FDT"] ||
         ""
     ).trim();
     if (!raw) return "unknown";
@@ -664,8 +666,8 @@ function parseCSV(text) {
 // ALIAS HEADER DATA FAT FULL
 // ==============================
 const FAT_HEADER_ALIASES = {
-    id:        ["id customer", "idcustomer", "id_cust", "id", "no", "nomor", "customer id", "cust id"],
-    label:     ["label fat new", "label fat old", "label", "nama", "nama customer", "nama pelanggan", "customer", "customer name", "name", "pelanggan"],
+    id:        ["check id fat", "check id fdt", "id customer", "idcustomer", "id_cust", "id", "no", "nomor", "customer id", "cust id"],
+    label:     ["label fat new", "label fat old", "fat code old", "fdt code survey", "label", "nama", "nama customer", "nama pelanggan", "customer", "customer name", "name", "pelanggan"],
     siteId:    ["site id", "siteid", "site_id"],
     city:      ["kota/kabupaten", "kota/kab", "kota kabupaten", "kota-kabupaten", "kota", "kabupaten", "kab/kota", "kab kota", "city", "kab", "kabkota"],
     district:  ["kecamatan", "kec", "district"],
@@ -673,9 +675,9 @@ const FAT_HEADER_ALIASES = {
     site:      ["nama site", "namasite", "site", "site name", "nama sisi", "sisi", "lokasi site"],
     status:    ["status fat", "status", "keterangan fat", "jenis", "jenis fat", "kategori", "tipe", "fat/non fat"],
     ket:       ["keterangan", "ket", "catatan", "note", "notes", "remark"],
-    visitDate: ["update fat", "tanggal", "tgl", "tanggal visit", "tgl visit", "visit date", "tanggal fat", "tgl fat", "survey date", "date"],
-    latitude:  ["latitude", "lat", "koordinat latitude", "lintang", "y"],
-    longitude: ["longitude", "lon", "long", "lng", "koordinat longitude", "bujur", "x"],
+    visitDate: ["update fat", "update fdt", "tanggal", "tgl", "tanggal visit", "tgl visit", "visit date", "tanggal fat", "tgl fat", "survey date", "date"],
+    latitude:  ["fat latitude", "fdt latitude", "latitude", "lat", "koordinat latitude", "lintang", "y"],
+    longitude: ["fat longitude", "fdt longitude", "longitude", "lon", "long", "lng", "koordinat longitude", "bujur", "x"],
     userLatitude: ["user latitude"],
     userLongitude: ["user longitude"],
     splitterCount: ["jumlah splitter", "jumlah splitters", "splitter count", "splitter", "total splitter"],
@@ -738,6 +740,15 @@ function resolveFATHeaders(rawRows) {
         }
     }
 
+    const normalizedHeaders = headers.map(normHeader);
+    const hasHeader = names => names.some(name => normalizedHeaders.includes(name));
+    mapping.dataType = hasHeader(["fdt_code survey", "check id fdt", "fdt_latitude", "fdt_longitude", "status fdt"])
+        ? "FDT"
+        : hasHeader(["fat code old", "check id fat", "fat_latitude", "fat_longitude", "status fat"])
+            ? "FAT"
+            : null;
+
+    if (!mapping.site && mapping.siteId) mapping.site = mapping.siteId;
     __fatHeaderCache.set(cacheKey, mapping);
     console.log('[CUSTOMER_MAP] resolveFATHeaders:', JSON.stringify(mapping));
     return mapping;
@@ -760,8 +771,8 @@ function parseFATRow(row, mapping, index) {
     let city = get('city');
     const district = get('district');
     const ward = get('ward');
-    const site = get('site');
     const siteId = get('siteId');
+    const site = get('site') || siteId;
     const status = get('status');
     const ket = get('ket');
     const visitDate = get('visitDate');
@@ -818,6 +829,7 @@ function parseFATRow(row, mapping, index) {
         team: '',
         vendor: '',
         status,
+        dataType: mapping.dataType || 'FAT',
         ket,
         visitDate,
         latitude: lat,
@@ -2326,8 +2338,9 @@ function drawCustomers(data, options){
         data.forEach(customer => {
             const cid = String(customer.id || '').trim();
             if (!cid) return;
-            if (!groupIdMap.has(cid)) groupIdMap.set(cid, []);
-            groupIdMap.get(cid).push(customer);
+            const key = `${customer.dataType || 'FAT'}::${cid}`;
+            if (!groupIdMap.has(key)) groupIdMap.set(key, []);
+            groupIdMap.get(key).push(customer);
         });
 
         // Render a feature for every input row (useful when filtering by ward/district to show all group members)
@@ -2461,7 +2474,7 @@ function drawCustomers(data, options){
             if (idx < 20) console.log('[DRAW] ward=' + customer.ward + ' district=' + customer.district + ' randPt=' + (randPt ? 'YES' : 'NO') + ' lat=' + (randPt ? randPt.latitude : c.latitude) + ' lon=' + (randPt ? randPt.longitude : c.longitude) + ' resolvedBy=' + (c.resolvedBy || 'original'));
             // Attach groupMembers from id_customer duplicates
             const cid = String(c.id || '').trim();
-            const members = cid ? groupIdMap.get(cid) : null;
+            const members = cid ? groupIdMap.get(`${c.dataType || 'FAT'}::${cid}`) : null;
             if (members && members.length > 1) {
                 c.groupMembers = members;
                 c.groupCount = members.length;
@@ -2481,7 +2494,7 @@ function drawCustomers(data, options){
                 try { console.log(`drawCustomers: sample[${idx}] id=${customer.id} lat=${customer.latitude} lon=${customer.longitude} resolvedBy=${customer.resolvedBy || 'original'}`); } catch(e) {}
             }
             const custId = String(customer.id || '').trim();
-            const key = custId ? `id::${custId}` : `unknown::${idx}`;
+            const key = custId ? `id::${customer.dataType || 'FAT'}::${custId}` : `unknown::${idx}`;
             if (!idMap.has(key)) idMap.set(key, []);
             idMap.get(key).push(customer);
         });
@@ -2539,6 +2552,7 @@ function drawCustomers(data, options){
                 team: rep.team || '',
                 vendor: rep.vendor || '',
                 status: rep.status || '',
+                dataType: rep.dataType || 'FAT',
                 visitDate: rep.visitDate || '',
                 latitude: coord.latitude,
                 longitude: coord.longitude,
@@ -2892,23 +2906,36 @@ Number.isFinite(customer.longitude)
     const rawFatData = customer.dataFatFull && typeof customer.dataFatFull === 'object'
         ? customer.dataFatFull
         : {};
+    const normalizeRawHeader = value => normalize(value)
+        .toLowerCase()
+        .replace(/_/g, ' ')
+        .replace(/[^a-z0-9 ]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     const rawFieldAliases = {
         'survey date': ['survey date', 'update fat'],
-        'update fat': ['update fat', 'survey date', 'tanggal fat', 'tanggal'],
+        'update fat': ['update fat', 'update fdt', 'survey date', 'tanggal fat', 'tanggal'],
+        'update fdt': ['update fdt', 'update fat', 'survey date'],
         'update installation': ['update installation', 'installation date'],
         'jumlah pelanggan baru': ['jumlah pelanggan baru'],
         'project site': ['project site'],
         'total used (visual)': ['total used (visual)', 'total used visual', 'total used'],
         'total idle (visual)': ['total idle (visual)', 'total idle visual', 'total idle'],
-        'status port': ['status port', 'status fat', 'status'],
-        'status fat': ['status fat', 'status port', 'status'],
+        'status port': ['status port', 'status fat', 'status fdt', 'status'],
+        'status fat': ['status fat', 'status fdt', 'status port', 'status'],
         'province': ['province', 'provinsi'],
-        'ioh business area': ['ioh business area', 'business area']
+        'ioh business area': ['ioh business area', 'business area'],
+        'cluster name': ['cluster name'],
+        'fat code old': ['fat code old', 'label fat old', 'label fat new', 'fdt code survey'],
+        'check id fat': ['check id fat', 'check id fdt'],
+        'fat latitude': ['fat latitude', 'fdt latitude', 'latitude'],
+        'fat longitude': ['fat longitude', 'fdt longitude', 'longitude'],
+        'site id': ['site id', 'siteid']
     };
     const findRawKey = header => {
-        const normalizedHeader = normalizeKey(header);
+        const normalizedHeader = normalizeRawHeader(header);
         const keys = rawFieldAliases[normalizedHeader] || [normalizedHeader];
-        return Object.keys(rawFatData).find(item => keys.includes(normalizeKey(item)));
+        return Object.keys(rawFatData).find(item => keys.includes(normalizeRawHeader(item)));
     };
     const getRawValue = header => {
         const key = findRawKey(header);
@@ -2919,10 +2946,13 @@ Number.isFinite(customer.longitude)
         return text ? escapeHtml(text) : '-';
     };
     const additionalDetails = [
-        { label: 'Label FAT OLD', field: 'Label FAT OLD' },
+        { label: findRawKey('Check ID FAT') || 'Check ID FAT', field: 'Check ID FAT' },
         { label: 'PROVINCE', field: 'PROVINCE' },
         { label: 'IOH BUSINESS AREA', field: 'IOH BUSINESS AREA' },
-        { label: 'Update FAT', field: 'Update FAT' },
+        { label: 'CLUSTER NAME', field: 'CLUSTER NAME' },
+        { label: findRawKey('FAT LATITUDE') || 'FAT LATITUDE', field: 'FAT LATITUDE' },
+        { label: findRawKey('FAT LONGITUDE') || 'FAT LONGITUDE', field: 'FAT LONGITUDE' },
+        { label: findRawKey('Update FAT') || 'Update FAT', field: 'Update FAT' },
         { label: 'Update Installation', field: 'Update Installation' },
         { label: 'Jumlah Pelanggan Baru', field: 'Jumlah Pelanggan Baru' },
         { label: 'Project Site', field: 'Project Site' }
@@ -2933,11 +2963,13 @@ Number.isFinite(customer.longitude)
                     <td>${displayValue(getRawValue(field))}</td>
                 </tr>
     `).join('');
+    const statusHeader = findRawKey('Status FDT') || findRawKey('Status FAT') || 'Status FAT';
     const detailFields = [
+        ...(findRawKey('Jumlah Splitter') ? ['Jumlah Splitter'] : []),
         'Total Port',
         'Total Used',
         'Total Idle',
-        'Status FAT'
+        statusHeader
     ];
     const siteId = customer.siteId || getRawValue('Site ID');
     const detailHeaders = detailFields.map(header =>
@@ -2946,13 +2978,15 @@ Number.isFinite(customer.longitude)
     const detailValues = detailFields.map(header =>
         `<td>${displayValue(getRawValue(header))}</td>`
     ).join('');
+    const labelHeader = findRawKey('FAT CODE OLD') || 'Label';
+    const siteName = normalizeKey(customer.site) !== normalizeKey(siteId) ? customer.site : '';
 
     popup.innerHTML = `
 
         <div class="customer-popup">
             <table>
                 <tr>
-                    <td>Label</td>
+                    <td>${escapeHtml(labelHeader)}</td>
                     <td>${escapeHtml(customer.label || customer.username || idDisplay)}</td>
                 </tr>
                 <tr>
@@ -2965,7 +2999,7 @@ Number.isFinite(customer.longitude)
                 </tr>
                 <tr>
                     <td>Nama Site</td>
-                    <td>${displayValue(customer.site)}</td>
+                    <td>${displayValue(siteName)}</td>
                 </tr>
                 ${additionalRows}
             </table>
@@ -3545,7 +3579,7 @@ function updateFilters() {
    ========================================================= */
 
 /* =========================================================
-   SIDEBAR FILTER (dipakai peta & tabel "Seluruh Data FAT")
+   SIDEBAR FILTER (dipakai peta & tabel data FAT/FDT)
    ========================================================= */
 
 function getSidebarFilterState() {
@@ -4205,10 +4239,8 @@ function setupDashboard() {
             "dashboard-toggle"
         );
  
-    const viewAllButton =
-        document.getElementById(
-            "view-all-data-button"
-        );
+    const viewAllFatButton = document.getElementById("view-all-fat-button");
+    const viewAllFdtButton = document.getElementById("view-all-fdt-button");
  
  
     // Helper: toggle geolocate button visibility based on dashboard state
@@ -4265,15 +4297,13 @@ function setupDashboard() {
  
     }
  
-    if (viewAllButton) {
-        viewAllButton.addEventListener('click', function() {
-            openDataView();
-        });
-    }
+    if (viewAllFatButton) viewAllFatButton.addEventListener('click', () => openDataView('FAT'));
+    if (viewAllFdtButton) viewAllFdtButton.addEventListener('click', () => openDataView('FDT'));
  
 }
  
 let dataViewCurrentPage = 1;
+let dataViewCurrentType = 'FAT';
 const DATA_VIEW_PAGE_SIZE = 100;
  
 function escapeHtml(value) {
@@ -4325,7 +4355,9 @@ function getDataViewData() {
     const query = String(searchInput?.value || '').trim();
     const filters = getSidebarFilterState();
 
-    let data = filterCustomersBySidebar(Array.isArray(customers) ? customers : [], filters);
+    const selectedCustomers = (Array.isArray(customers) ? customers : [])
+        .filter(item => (item.dataType || 'FAT') === dataViewCurrentType);
+    let data = filterCustomersBySidebar(selectedCustomers, filters);
     if (query) {
         data = data.filter(item => matchesDataViewSearch(item, query));
     }
@@ -4348,7 +4380,9 @@ function renderDataView(page = 1) {
     const countLabel = document.getElementById('data-view-count');
     const searchInput = document.getElementById('data-view-search');
     const tableHead = document.querySelector('#data-view-table thead');
+    const title = document.getElementById('data-view-title');
     if (!overlay || !tbody || !pageInfo || !countLabel || !searchInput) return;
+    if (title) title.textContent = `Seluruh Data ${dataViewCurrentType}`;
  
     const viewData = getDataViewData();
     const data = viewData.data;
@@ -4394,9 +4428,10 @@ function renderDataView(page = 1) {
   
 }
  
-function openDataView() {
+function openDataView(dataType = 'FAT') {
     const overlay = document.getElementById('data-view-overlay');
     if (!overlay) return;
+    dataViewCurrentType = dataType === 'FDT' ? 'FDT' : 'FAT';
     overlay.style.display = 'block';
     // hide geolocate button while data view overlay is visible
     try { const gw = document.getElementById('geolocate-wrapper'); if (gw) gw.style.display = 'none'; } catch (e) {}
@@ -4616,11 +4651,11 @@ function exportDataViewToExcel() {
             rows.push(headers.map(header => raw[header] ?? ''));
         });
 
-        const blob = buildXlsxBlob(rows, 'Seluruh Data FAT');
+        const blob = buildXlsxBlob(rows, `Seluruh Data ${dataViewCurrentType}`);
         const now = new Date();
         const pad = n => String(n).padStart(2, '0');
         const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-        const filename = `Seluruh-Data-FAT_${stamp}.xlsx`;
+        const filename = `Seluruh-Data-${dataViewCurrentType}_${stamp}.xlsx`;
 
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -4870,14 +4905,20 @@ async function loadXlsxArrayBuffer(url) {
 }
 
 // Baca buffer XLSX -> array row objects (pakai XLSXLite dari resources/xlsx-lite.js)
-async function xlsxRowsFromBuffer(buf) {
+async function xlsxDataSetsFromBuffer(buf) {
     if (typeof XLSXLite !== 'undefined' && XLSXLite && typeof XLSXLite.read === 'function') {
         const wb = await XLSXLite.read(buf);
-        const name = (wb.sheetNames && wb.sheetNames[0]) || null;
-        const rows = name ? wb.sheets[name] : null;
-        if (!rows) throw new Error('XLSX tidak berisi sheet apa pun.');
-        console.log('[CUSTOMER_MAP] XLSX sheets:', wb.sheetNames.join(', '), '-> memakai sheet "' + name + '" rows=', rows.length);
-        return XLSXLite.sheetToObjects(rows);
+        const sheetNames = wb.sheetNames || [];
+        if (sheetNames.length === 0) throw new Error('XLSX tidak berisi sheet apa pun.');
+        const targetNames = sheetNames.filter(name => ['FAT', 'FDT'].includes(String(name).trim().toUpperCase()));
+        const selectedNames = targetNames.length > 0 ? targetNames : sheetNames.slice(0, 1);
+        const datasets = selectedNames.map(sheetName => {
+            const rows = wb.sheets[sheetName];
+            if (!rows) throw new Error(`Sheet "${sheetName}" tidak dapat dibaca.`);
+            return { sheetName, rows: XLSXLite.sheetToObjects(rows) };
+        });
+        console.log('[CUSTOMER_MAP] XLSX sheets:', sheetNames.join(', '), '-> memakai', datasets.map(data => `"${data.sheetName}" (${data.rows.length} rows)`).join(', '));
+        return datasets;
     }
     throw new Error('Parser XLSX (resources/xlsx-lite.js) tidak termuat.');
 }
@@ -4888,6 +4929,7 @@ function deduplicateCustomerMarkers(items) {
 
     for (const item of items) {
         const key = JSON.stringify([
+            item.dataType || 'FAT',
             String(item.label || item.id || '').trim().toUpperCase(),
             String(item.siteId || item.dataFatFull?.['Site ID'] || '').trim().toUpperCase(),
             Number(item.latitude),
@@ -4957,36 +4999,45 @@ async function loadData(input = null) {
 
         // Sumber data: data/Data FAT Full.xlsx (default), atau upload CSV/XLSX, atau array rows
         let rows;
+        let datasets = null;
         if (input === null) {
             await showLoadingMessage('Membaca file FAT...');
             const buf = await xlsxBufferPromise;
-            rows = await xlsxRowsFromBuffer(buf);
+            datasets = await xlsxDataSetsFromBuffer(buf);
+            rows = datasets[0]?.rows || [];
         } else if (Array.isArray(input)) {
             rows = input;
         } else if (typeof ArrayBuffer !== 'undefined' && input instanceof ArrayBuffer) {
             await showLoadingMessage('Membaca file FAT...');
-            rows = await xlsxRowsFromBuffer(input);
+            datasets = await xlsxDataSetsFromBuffer(input);
+            rows = datasets[0]?.rows || [];
         } else {
             await showLoadingMessage('Membaca file FAT...');
             rows = parseCSV(String(input));
         }
+        if (!datasets) datasets = [{ sheetName: 'FAT', rows }];
 
-        console.log('[CUSTOMER_MAP] loadData start, rows=', rows.length);
+        console.log('[CUSTOMER_MAP] loadData start, rows=', datasets.map(data => `${data.sheetName}=${data.rows.length}`).join(', '));
         // Faster initial render: show a small immediate subset while full CSV is parsed in the background
         const t0 = performance.now();
 
         // Parse seluruh rows secara chunked (tanpa preview; dataset XLSX sudah cepat diparse)
         const isMobile = window.matchMedia('(max-width: 768px)').matches;
-        await showLoadingMessage('Memproses data FAT... 0%');
-        customers = await parseCustomerDataAsync(rows, {
-            chunkSize: isMobile ? 250 : 1000,
-            onProgress: (processed, total) => {
-                if (loadingMessage && total > 0) {
-                    const percent = Math.floor((processed / total) * 100);
-                    loadingMessage.textContent = `Memproses data FAT... ${percent}%`;
+        customers = [];
+        for (const dataset of datasets) {
+            const dataType = String(dataset.sheetName || 'FAT').trim().toUpperCase() === 'FDT' ? 'FDT' : 'FAT';
+            await showLoadingMessage(`Memproses data ${dataType}... 0%`);
+            const parsed = await parseCustomerDataAsync(dataset.rows, {
+                chunkSize: isMobile ? 250 : 1000,
+                onProgress: (processed, total) => {
+                    if (loadingMessage && total > 0) {
+                        const percent = Math.floor((processed / total) * 100);
+                        loadingMessage.textContent = `Memproses data ${dataType}... ${percent}%`;
+                    }
                 }
-            }
-        });
+            });
+            customers.push(...parsed);
+        }
         const t1 = performance.now();
         console.log('[CUSTOMER_MAP] loadData parsed customers count=', customers.length, 'parseMs=', Math.round(t1 - t0));
         siteValuesCache.clear();
@@ -4995,7 +5046,7 @@ async function loadData(input = null) {
 
         if (customers.length === 0) {
             console.warn('[CUSTOMER_MAP] loadData: tidak ada baris valid diparse, mencoba fallback parse');
-            customers = deduplicateCustomerMarkers(fallbackParseCustomerRows(rows));
+            customers = deduplicateCustomerMarkers(datasets.flatMap(dataset => fallbackParseCustomerRows(dataset.rows)));
             console.log('[CUSTOMER_MAP] loadData fallback customers count=', customers.length);
         }
 
