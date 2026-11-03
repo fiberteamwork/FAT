@@ -4,7 +4,7 @@
    Separator : ;
    ========================================================= */
 
-console.log('[CUSTOMER_MAP] loaded version 20261102.1 (FAT/FDT XLSX)');
+console.log('[CUSTOMER_MAP] loaded version 20261103.1 (FAT/FDT XLSX)');
 
 const DATA_URL = "./data/Data FAT Full.xlsx?v=20261012.1";
 const ASIANET_SURABAYA_FOCUS = {
@@ -106,6 +106,7 @@ const PORT_STATUS_CONFIG = {
     available: { label: "Port Available🟢", color: "#22c55e" },
     noData: { label: "Belum Ada Data🟤", color: "#8b5e3c" },
     needCheck: { label: "Need Check Input FAT🟠", color: "#f97316" },
+    needUpdateSystem: { label: "Need Update System & Spliter FAT 🔵", color: "#3b82f6" },
     unavailable: { label: "Port Unavailable⚫", color: "#111827" },
     odcAvailable: { label: "Port ODC Available📗", color: "#16a34a" },
     odcFull: { label: "Port ODC Full📕", color: "#dc2626" },
@@ -116,7 +117,7 @@ const PORT_STATUS_CONFIG = {
 // Kategori yang hanya muncul untuk record ODC (dipisah dari chart FAT)
 const ODC_STATUS_KEYS = ["odcAvailable", "odcFull"];
 
-const PORT_STATUS_FILTER_KEYS = ["full", "available", "noData", "needCheck", "unavailable", "odcAvailable", "odcFull"];
+const PORT_STATUS_FILTER_KEYS = ["full", "available", "noData", "needCheck", "needUpdateSystem", "unavailable", "odcAvailable", "odcFull"];
 
 function getPortStatusKey(customer) {
     const explicit = String(
@@ -134,6 +135,7 @@ function getPortStatusKey(customer) {
     if (explicit.includes("odc") && (explicit.includes("avaible") || explicit.includes("available") || explicit.includes("idle"))) return "odcAvailable";
     if (explicit.includes("odc") && (explicit.includes("full") || explicit.includes("penuh"))) return "odcFull";
     if (explicit.includes("belum ada data") || explicit.includes("no data")) return "noData";
+    if (explicit.includes("need update system") || explicit.includes("spliter fat")) return "needUpdateSystem";
     if (explicit.includes("need check") || explicit.includes("perlu pengecekan")) return "needCheck";
     if (explicit.includes("full") || explicit.includes("penuh")) return "full";
     if (explicit.includes("avaible") || explicit.includes("available") || explicit.includes("idle")) return "available";
@@ -164,6 +166,7 @@ const FAT_STATUS_EMOJI = {
     "🟢": "available",
     "🔴": "full",
     "🟠": "needCheck",
+    "🔵": "needUpdateSystem",
     "🟤": "noData",
     "⚫": "unavailable"
 };
@@ -174,6 +177,7 @@ const FAT_STATUS_SYMBOL_CONFIG = {
     available:     { label: "Port Available🟢", color: "#22c55e", shape: "circle" },
     full:          { label: "Port Full🔴", color: "#ef4444", shape: "circle" },
     needCheck:     { label: "Need Check Input FAT🟠", color: "#f97316", shape: "circle" },
+    needUpdateSystem: { label: "Need Update System & Spliter FAT 🔵", color: "#3b82f6", shape: "circle" },
     noData:        { label: "Belum Ada Data🟤", color: "#8b5e3c", shape: "circle" },
     unavailable:   { label: "Port Unavailable⚫", color: "#111827", shape: "circle" },
     unknown:       { label: "Tidak diketahui⚪", color: "#9ca3af", shape: "circle" }
@@ -197,6 +201,7 @@ function getFATSymbolKey(customer) {
     const s = raw.toLowerCase();
     if (s.includes("unavailable")) return "unavailable";
     if (s.includes("belum ada data") || s.includes("no data")) return "noData";
+    if (s.includes("need update system") || s.includes("spliter fat")) return "needUpdateSystem";
     if (s.includes("need check") || s.includes("perlu pengecekan")) return "needCheck";
     if (s.includes("available") || s.includes("avaible") || s.includes("idle")) return "available";
     if (s.includes("full") || s.includes("penuh")) return "full";
@@ -3787,6 +3792,7 @@ function updateODCChart(data) {
         odcChart.destroy();
 
     if (totalODC === 0) {
+        odcChart = null;
         if (legend) legend.innerHTML = "";
         return;
     }
@@ -4239,8 +4245,7 @@ function setupDashboard() {
             "dashboard-toggle"
         );
  
-    const viewAllFatButton = document.getElementById("view-all-fat-button");
-    const viewAllFdtButton = document.getElementById("view-all-fdt-button");
+    const viewDataButton = document.getElementById("view-data-button");
  
  
     // Helper: toggle geolocate button visibility based on dashboard state
@@ -4297,8 +4302,7 @@ function setupDashboard() {
  
     }
  
-    if (viewAllFatButton) viewAllFatButton.addEventListener('click', () => openDataView('FAT'));
-    if (viewAllFdtButton) viewAllFdtButton.addEventListener('click', () => openDataView('FDT'));
+    if (viewDataButton) viewDataButton.addEventListener('click', () => openDataView('FAT'));
  
 }
  
@@ -4381,8 +4385,20 @@ function renderDataView(page = 1) {
     const searchInput = document.getElementById('data-view-search');
     const tableHead = document.querySelector('#data-view-table thead');
     const title = document.getElementById('data-view-title');
+    const fatButton = document.getElementById('data-view-fat-button');
+    const fdtButton = document.getElementById('data-view-fdt-button');
     if (!overlay || !tbody || !pageInfo || !countLabel || !searchInput) return;
     if (title) title.textContent = `Seluruh Data ${dataViewCurrentType}`;
+    if (fatButton) {
+        const selected = dataViewCurrentType === 'FAT';
+        fatButton.setAttribute('aria-pressed', String(selected));
+        fatButton.style.backgroundColor = selected ? '#0d9103' : '#64748b';
+    }
+    if (fdtButton) {
+        const selected = dataViewCurrentType === 'FDT';
+        fdtButton.setAttribute('aria-pressed', String(selected));
+        fdtButton.style.backgroundColor = selected ? '#0d9103' : '#64748b';
+    }
  
     const viewData = getDataViewData();
     const data = viewData.data;
@@ -4676,6 +4692,8 @@ function setupDataView() {
     const closeBtn = document.getElementById('data-view-close');
     const prev = document.getElementById('data-view-prev');
     const next = document.getElementById('data-view-next');
+    const fatButton = document.getElementById('data-view-fat-button');
+    const fdtButton = document.getElementById('data-view-fdt-button');
     if (!overlay || setupDataView._initialized) return;
     setupDataView._initialized = true;
  
@@ -4692,6 +4710,18 @@ function setupDataView() {
     if (next) {
         next.addEventListener('click', function() {
             renderDataView(dataViewCurrentPage + 1);
+        });
+    }
+    if (fatButton) {
+        fatButton.addEventListener('click', function() {
+            dataViewCurrentType = 'FAT';
+            renderDataView(1);
+        });
+    }
+    if (fdtButton) {
+        fdtButton.addEventListener('click', function() {
+            dataViewCurrentType = 'FDT';
+            renderDataView(1);
         });
     }
    const searchInput = document.getElementById('data-view-search');
