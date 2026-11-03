@@ -34,7 +34,7 @@
             'resources/Autolinker.min.js',
             'resources/qgis2web.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'resources/customer-map.js?v=20261022.4'
+            'resources/customer-map.js?v=20261103.2'
         ];
 
         const loadingMessage = byId('map-loading-message');
