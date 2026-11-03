@@ -602,6 +602,48 @@ body:not(.auth-ready) #data-view-overlay {
     color: #172b4d;
 }
 
+#change-password-modal .user-management-header {
+    align-items: center;
+}
+
+#change-password-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 7px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #475569;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+#change-password-close:hover {
+    border-color: #cbd5e1;
+    background: #eef2f7;
+    color: #1e293b;
+}
+
+#change-password-close:active {
+    transform: scale(.97);
+}
+
+#change-password-close:focus-visible {
+    outline: 3px solid rgba(37, 99, 235, .28);
+    outline-offset: 2px;
+}
+
+#change-password-close svg {
+    width: 16px;
+    height: 16px;
+}
+
 .user-management-card h3 {
     margin: 22px 0 8px;
 }
@@ -703,7 +745,7 @@ body:not(.auth-ready) #data-view-overlay {
                 <h2 id="user-management-title">Kelola Akun</h2>
                 <p class="auth-subtitle" style="text-align:left; margin:8px 0 14px;">Tambah akun admin atau user yang dapat digunakan di semua perangkat.</p>
             </div>
-            <button type="button" id="user-management-close" class="auth-small-button">Tutup</button>
+            <button type="button" id="user-management-close" class="btn btn-danger">Tutup</button>
         </div>
         <form id="admin-user-form" class="admin-user-form">
             <label for="admin-new-username">Username</label>
@@ -760,7 +802,10 @@ body:not(.auth-ready) #data-view-overlay {
         <div class="user-management-card">
             <div class="user-management-header">
                 <h2 id="change-password-title">Ubah Password</h2>
-                <button type="button" id="change-password-close" class="auth-small-button">Tutup</button>
+                <button type="button" id="change-password-close" aria-label="Tutup dialog Ubah Password">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    <span>Tutup</span>
+                </button>
             </div>
             <form id="change-password-form" class="auth-form">
                 <label for="auth-current-password">Password saat ini</label>
@@ -858,7 +903,7 @@ body:not(.auth-ready) #data-view-overlay {
 		</div>
 		<div style="display:flex; gap:8px; align-items:center;">
 			<button id="data-view-export" type="button" style="display:none; border:0; background:#0d9103; color:white; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:bold;">⬇ Export Excel</button>
-			<button id="data-view-close" style="border:0; background:#ef4444; color:white; padding:8px 12px; border-radius:8px; cursor:pointer;">Tutup</button>
+			<button id="data-view-close" class="btn btn-danger">Tutup</button>
 		</div>
     </div>
     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
