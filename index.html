@@ -630,16 +630,16 @@ body:not(.auth-ready) #data-view-overlay {
             <option value="">Semua Kota/Kabupaten</option>
         </select>
 
-        <label>Nama Site</label>
+        <label for="filter-site-toggle">Cluster Name</label>
         <div class="site-dropdown" id="site-dropdown">
-            <button type="button" id="filter-site-toggle" class="site-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false">Semua Nama Site</button>
+            <button type="button" id="filter-site-toggle" class="site-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false">Semua Cluster Name</button>
             <div id="filter-site-panel" class="site-dropdown-panel" hidden>
-                <input type="text" id="filter-site-search" placeholder="Cari nama site..." role="combobox" aria-controls="filter-site-options" aria-expanded="true" autocomplete="off">
-                <div id="filter-site-options" class="site-dropdown-options" role="listbox" aria-label="Pilihan nama site"></div>
+                <input type="text" id="filter-site-search" placeholder="Cari Cluster Name..." role="combobox" aria-controls="filter-site-options" aria-expanded="true" autocomplete="off">
+                <div id="filter-site-options" class="site-dropdown-options" role="listbox" aria-label="Pilihan Cluster Name"></div>
             </div>
         </div>
         <select id="filter-site" hidden>
-            <option value="">Semua Nama Site</option>
+            <option value="">Semua Cluster Name</option>
         </select>
 
         <label>Status Port</label>
@@ -737,7 +737,7 @@ body:not(.auth-ready) #data-view-overlay {
         </div>
         <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script defer src="./resources/supabase-config.js?v=20261012.3"></script>
-        <script defer src="./resources/browser-auth.js?v=20261103.2"></script>
+        <script defer src="./resources/browser-auth.js?v=20261103.4"></script>
         
     </body>
 </html>
