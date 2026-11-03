@@ -647,8 +647,7 @@ body:not(.auth-ready) #data-view-overlay {
             <option value="">Semua Status Port</option>
         </select>
 
-        <button id="view-all-fat-button" type="button" style="margin-top:12px; width:100%; padding:10px; border-radius:8px; border:1px solid #ffffff; background:#0d9103; cursor:pointer; font-weight:bold;"><font color="white">Lihat Seluruh Data FAT</font></button>
-        <button id="view-all-fdt-button" type="button" style="margin-top:8px; width:100%; padding:10px; border-radius:8px; border:1px solid #ffffff; background:#0d9103; cursor:pointer; font-weight:bold;"><font color="white">Lihat Seluruh Data FDT</font></button>
+        <button id="view-data-button" type="button" style="margin-top:12px; width:100%; padding:10px; border-radius:8px; border:1px solid #ffffff; background:#0d9103; color:white; cursor:pointer; font-weight:bold;">Lihat Data</button>
 
     </div>
     <div id="summary">
@@ -697,6 +696,10 @@ body:not(.auth-ready) #data-view-overlay {
 			<button id="data-view-close" style="border:0; background:#ef4444; color:white; padding:8px 12px; border-radius:8px; cursor:pointer;">Tutup</button>
 		</div>
     </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+        <button id="data-view-fat-button" type="button" aria-pressed="true" style="flex:1 1 220px; padding:10px; border:0; border-radius:8px; background:#0d9103; color:white; cursor:pointer; font-weight:bold;">Lihat Seluruh Data FAT</button>
+        <button id="data-view-fdt-button" type="button" aria-pressed="false" style="flex:1 1 220px; padding:10px; border:0; border-radius:8px; background:#64748b; color:white; cursor:pointer; font-weight:bold;">Lihat Seluruh Data FDT</button>
+    </div>
     <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <label for="data-view-search" style="font-size:13px; margin:0; min-width:110px;">Cari data:</label>
         <input id="data-view-search" type="text" placeholder="Cari label, kota, site, keterangan..." style="flex:1; min-width:220px; padding:8px; border:1px solid #ccc; border-radius:8px;" />
@@ -734,7 +737,7 @@ body:not(.auth-ready) #data-view-overlay {
         </div>
         <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script defer src="./resources/supabase-config.js?v=20261012.3"></script>
-        <script defer src="./resources/browser-auth.js?v=20261102.1"></script>
+        <script defer src="./resources/browser-auth.js?v=20261103.2"></script>
         
     </body>
 </html>
