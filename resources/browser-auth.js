@@ -34,7 +34,7 @@
             'resources/Autolinker.min.js',
             'resources/qgis2web.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'resources/customer-map.js?v=20261103.2'
+            'resources/customer-map.js?v=20261103.4'
         ];
 
         const loadingMessage = byId('map-loading-message');
@@ -103,6 +103,7 @@
         byId('auth-session-label').textContent =
             `${activeAccount.username} ${activeAccount.role === 'admin' ? 'Admin' : 'User'}`;
         byId('auth-manage-users').hidden = activeAccount.role !== 'admin';
+        setProfileMenuOpen(false);
         byId('auth-gate').hidden = true;
         document.body.classList.add('auth-ready');
         const mapLoading = byId('map-loading');
@@ -115,6 +116,7 @@
 
     function showLogin() {
         activeAccount = null;
+        setProfileMenuOpen(false);
         sessionStorage.removeItem(SESSION_LABEL);
         document.body.classList.remove('auth-ready');
         byId('auth-gate').hidden = false;
@@ -148,6 +150,14 @@
             });
     }
 
+    function setProfileMenuOpen(open) {
+        const toggle = byId('auth-profile-toggle');
+        const dropdown = byId('auth-profile-dropdown');
+        if (!toggle || !dropdown) return;
+        toggle.setAttribute('aria-expanded', String(open));
+        dropdown.hidden = !open;
+    }
+
     async function refreshAccounts() {
         const result = await accountApi('list');
         renderAccounts(result.accounts);
@@ -162,6 +172,22 @@
     }
 
     function bindEvents() {
+        byId('auth-profile-toggle').addEventListener('click', () => {
+            const isOpen = byId('auth-profile-toggle').getAttribute('aria-expanded') === 'true';
+            setProfileMenuOpen(!isOpen);
+        });
+        document.addEventListener('click', event => {
+            if (!byId('auth-profile-menu').contains(event.target)) {
+                setProfileMenuOpen(false);
+            }
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && byId('auth-profile-toggle').getAttribute('aria-expanded') === 'true') {
+                setProfileMenuOpen(false);
+                byId('auth-profile-toggle').focus();
+            }
+        });
+
         byId('auth-setup-form').addEventListener('submit', async event => {
             event.preventDefault();
             const button = event.currentTarget.querySelector('button[type="submit"]');
@@ -203,6 +229,7 @@
         });
 
         byId('auth-logout').addEventListener('click', async () => {
+            setProfileMenuOpen(false);
             const { error } = await authClient.auth.signOut();
             if (error) {
                 console.error('[AUTH] Logout gagal:', error);
@@ -213,6 +240,7 @@
         });
 
         byId('auth-change-password').addEventListener('click', () => {
+            setProfileMenuOpen(false);
             setMessage('change-password-message', '');
             byId('change-password-form').reset();
             byId('change-password-modal').hidden = false;
@@ -251,6 +279,7 @@
         });
 
         byId('auth-manage-users').addEventListener('click', async () => {
+            setProfileMenuOpen(false);
             if (activeAccount && activeAccount.role === 'admin') {
                 setMessage('admin-user-message', '');
                 try {
