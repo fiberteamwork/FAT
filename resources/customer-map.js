@@ -4,7 +4,7 @@
    Separator : ;
    ========================================================= */
 
-console.log('[CUSTOMER_MAP] loaded version 20261103.1 (FAT/FDT XLSX)');
+console.log('[CUSTOMER_MAP] loaded version 20261103.4 (FAT/FDT XLSX)');
 
 const DATA_URL = "./data/Data FAT Full.xlsx?v=20261012.1";
 const ASIANET_SURABAYA_FOCUS = {
@@ -3386,11 +3386,22 @@ normalize(
 
 }
 
+function getCustomerClusterName(customer) {
+    const raw = customer?.dataFatFull;
+    if (!raw || typeof raw !== "object") return "";
+    const key = Object.keys(raw).find(header =>
+        normalize(header).toLowerCase().replace(/_/g, " ") === "cluster name"
+    );
+    return key ? normalize(raw[key]) : "";
+}
+
 function getSiteValues(city) {
     const cacheKey = city || "";
     if (!siteValuesCache.has(cacheKey)) {
         const data = city ? customers.filter(customer => customer.city === city) : customers;
-        siteValuesCache.set(cacheKey, uniqueValues(data, "site"));
+        const clusterNames = data.map(getCustomerClusterName).filter(Boolean);
+        siteValuesCache.set(cacheKey, [...new Set(clusterNames)]
+            .sort((a, b) => a.localeCompare(b, "id")));
     }
     return siteValuesCache.get(cacheKey);
 }
@@ -3443,7 +3454,7 @@ function renderSiteDropdown(values, selectedValue) {
     const search = document.getElementById("filter-site-search");
     if (!toggle || !options || !search) return;
 
-    toggle.textContent = selectedValue || "Semua Nama Site";
+    toggle.textContent = selectedValue || "Semua Cluster Name";
     const query = normalize(search.value).toLowerCase();
     const matchingValues = query
         ? values.filter(value => normalize(value).toLowerCase().includes(query))
@@ -3458,7 +3469,7 @@ function renderSiteDropdown(values, selectedValue) {
         option.className = "site-dropdown-option";
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(value === selectedValue));
-        option.textContent = value || "Semua Nama Site";
+        option.textContent = value || "Semua Cluster Name";
         option.addEventListener("click", () => {
             const select = document.getElementById("filter-site");
             if (select) {
@@ -3466,12 +3477,12 @@ function renderSiteDropdown(values, selectedValue) {
                 if (!selectedOption) {
                     selectedOption = document.createElement("option");
                     selectedOption.value = value;
-                    selectedOption.textContent = value || "Semua Nama Site";
+                    selectedOption.textContent = value || "Semua Cluster Name";
                     select.appendChild(selectedOption);
                 }
                 select.value = value;
             }
-            toggle.textContent = value || "Semua Nama Site";
+            toggle.textContent = value || "Semua Cluster Name";
             document.getElementById("filter-site-panel").hidden = true;
             toggle.setAttribute("aria-expanded", "false");
             search.value = "";
@@ -3491,12 +3502,12 @@ function renderSiteDropdown(values, selectedValue) {
     if (!query && values.length > 0) {
         const empty = document.createElement("div");
         empty.className = "site-dropdown-option";
-        empty.textContent = "Ketik nama site untuk mencari";
+        empty.textContent = "Ketik Cluster Name untuk mencari";
         fragment.appendChild(empty);
     } else if (query && matchingValues.length === 0) {
         const empty = document.createElement("div");
         empty.className = "site-dropdown-option";
-        empty.textContent = "Nama site tidak ditemukan";
+        empty.textContent = "Cluster Name tidak ditemukan";
         fragment.appendChild(empty);
     } else if (matchingValues.length > MAX_SITE_DROPDOWN_OPTIONS) {
         const more = document.createElement("div");
@@ -3614,7 +3625,7 @@ function filterCustomersBySidebar(list, state) {
         const labelFatNew = normalize(c.dataFatFull?.["Label FAT NEW"]).toLowerCase();
         return (
             (!city || c.city === city)
-            && (!site || c.site === site)
+            && (!site || getCustomerClusterName(c) === site)
             && (!portStatus || cPortStatus === portStatus)
             && (!keyword
                 || normalize(c.label).toLowerCase().includes(keyword)
@@ -3636,8 +3647,8 @@ function applyFilters() {
 
     // Marker individual per baris; popup tampilkan info FAT per marker
     // Render every FAT record; each marker popup still shows only its clicked ID.
-    if (keyword && filtered.length > 0) {
-        // Pencarian FAT/ODP: langsung fokuskan peta ke arah marker hasil pencarian.
+    if ((keyword || filters.site) && filtered.length > 0) {
+        // Pencarian FAT/ODP atau pemilihan Cluster Name langsung memfokuskan hasil pada peta.
         focusMapOnCustomers(filtered);
         drawCustomers(filtered, { expandGroups: true, ignoreViewport: true });
     } else {
