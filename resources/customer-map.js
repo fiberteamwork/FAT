@@ -2954,19 +2954,25 @@ Number.isFinite(customer.longitude)
         const text = String(value ?? '').trim();
         return text ? escapeHtml(text) : '-';
     };
+    const isFdt = String(customer.dataType || '').toUpperCase() === 'FDT';
     const markerDetails = [
         ['CITY', getRawValue('CITY') || customer.city],
         ['PROVINCE', getRawValue('PROVINCE')],
         ['SITE ID', getRawValue('SITE ID') || customer.siteId],
         ['IOH BUSINESS AREA', getRawValue('IOH BUSINESS AREA')],
         ['CLUSTER NAME', getRawValue('CLUSTER NAME')],
-        ['FAT CODE OLD', getRawValue('FAT CODE OLD') || customer.label || customer.username || idDisplay],
-        ['Check ID FAT', getRawValue('Check ID FAT') || customer.id],
-        ['FAT LATITUDE', getRawValue('FAT LATITUDE') || customer.latitude],
-        ['FAT LONGITUDE', getRawValue('FAT LONGITUDE') || customer.longitude],
-        ['Update FAT', getRawValue('Update FAT')],
-        ['Update Installation', getRawValue('Update Installation')],
-        ['Sourch Data', getRawValue('Source Data')],
+        [
+            isFdt ? 'FDT CODE SURVEY' : 'FAT CODE OLD',
+            getRawValue(isFdt ? 'FDT CODE SURVEY' : 'FAT CODE OLD') || customer.label || customer.username || idDisplay
+        ],
+        [isFdt ? 'Check ID FDT' : 'Check ID FAT', getRawValue(isFdt ? 'Check ID FDT' : 'Check ID FAT') || customer.id],
+        [isFdt ? 'FDT LATITUDE' : 'FAT LATITUDE', getRawValue(isFdt ? 'FDT LATITUDE' : 'FAT LATITUDE') || customer.latitude],
+        [isFdt ? 'FDT LONGITUDE' : 'FAT LONGITUDE', getRawValue(isFdt ? 'FDT LONGITUDE' : 'FAT LONGITUDE') || customer.longitude],
+        [isFdt ? 'Update FDT' : 'Update FAT', getRawValue(isFdt ? 'Update FDT' : 'Update FAT')],
+        ...(!isFdt ? [
+            ['Update Installation', getRawValue('Update Installation')],
+            ['Sourch Data', getRawValue('Source Data')]
+        ] : [])
     ];
     const markerRows = markerDetails.map(([label, value]) => `
                 <tr>
@@ -2975,10 +2981,11 @@ Number.isFinite(customer.longitude)
                 </tr>
     `).join('');
     const portDetails = [
+        ...(isFdt ? [['Jumlah Splitter', getRawValue('Jumlah Splitter')]] : []),
         ['Total Port', getRawValue('Total Port')],
         ['Total Used', getRawValue('Total Used')],
         ['Total Idle', getRawValue('Total Idle')],
-        ['Status FAT', getRawValue('Status FAT') || customer.status]
+        [isFdt ? 'Status FDT' : 'Status FAT', getRawValue(isFdt ? 'Status FDT' : 'Status FAT') || customer.status]
     ];
     const portHeaders = portDetails.map(([label]) =>
         `<th scope="col">${escapeHtml(label)}</th>`
