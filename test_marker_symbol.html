@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Uji Symbol Status FAT Marker</title>
+<link rel="stylesheet" href="./resources/ol.css">
+<style>
+body { font-family: monospace; padding: 12px; background: #111; color: #eee; }
+#map { width: 500px; height: 400px; border: 1px solid #444; background: #ddd; }
+pre { white-space: pre-wrap; word-break: break-all; }
+.pass { color: #4ade80; }
+.fail { color: #f87171; }
+</style>
+</head>
+<body>
+<h3>Uji bentuk &amp; warna marker terhadap 8 nilai Status FAT (Data FAT Full.xlsx)</h3>
+<div id="map"></div>
+<pre id="out">loading...</pre>
+<script>
+// Blokir auto-start startCustomerMap (menunggu auth tak berujung, sama seperti browser-auth.js)
+// agar removeStaleCustomerLayers di dalam loadData tidak menghapus layer uji.
+window.dashboardAuthReady = new Promise(function () {});
+</script>
+<script src="./resources/ol.js"></script>
+<script src="./resources/customer-map.js?v=20261116.3"></script>
+<script>
+(function () {
+    const out = document.getElementById('out');
+    const lines = [];
+    let pass = 0, fail = 0;
+    const ok = (name, cond, detail) => {
+        if (cond) { pass++; lines.push('<span class="pass">PASS</span> ' + name); }
+        else { fail++; lines.push('<span class="fail">FAIL</span> ' + name + (detail ? ' => ' + detail : '')); }
+    };
+
+    // 8 nilai Status FAT untuk menguji bentuk & warna marker
+    const SAMPLES = [
+        { status: 'Port Available🟢',  expectKey: 'available',     expectShape: 'circle',  expectColor: '#22c55e' },
+        { status: 'Port Full🔴',       expectKey: 'full',          expectShape: 'circle',  expectColor: '#ef4444' },
+        { status: 'Belum Ada Data🟤',  expectKey: 'noData',        expectShape: 'circle',  expectColor: '#8b5e3c' },
+        { status: 'Port Available📗',  expectKey: 'availableBook', expectShape: 'triangle',  expectColor: '#16a34a' },
+        { status: 'Need Check Input FAT🟠', expectKey: 'needCheck', expectShape: 'circle', expectColor: '#f97316' },
+        { status: 'Need Update System & Spliter FAT 🔵', expectKey: 'needUpdateSystem', expectShape: 'circle', expectColor: '#3b82f6' },
+        { status: 'Port Full📕',       expectKey: 'fullBook',      expectShape: 'triangle',  expectColor: '#dc2626' },
+        { status: 'Port Unavailable⚫', expectKey: 'unavailable',  expectShape: 'circle',  expectColor: '#111827' }
+    ];
+
+    // 1) Kunci symbol
+    SAMPLES.forEach(s => {
+        const key = getFATSymbolKey({ status: s.status });
+        ok('getFATSymbolKey("' + s.status + '")', key === s.expectKey, key);
+    });
+    ok('getFATSymbolKey(kosong) -> unknown', getFATSymbolKey({}) === 'unknown', getFATSymbolKey({}));
+    // fallback teks tanpa emoji
+    ok('fallback teks "Port Available"', getFATSymbolKey({ status: 'Port Available' }) === 'available', getFATSymbolKey({ status: 'Port Available' }));
+    ok('fallback teks "Belum Ada Data"', getFATSymbolKey({ status: 'Belum Ada Data' }) === 'noData', getFATSymbolKey({ status: 'Belum Ada Data' }));
+    // fallback via dataFatFull ketika .status kosong
+    ok('baca dari dataFatFull["Status FAT"]', getFATSymbolKey({ dataFatFull: { 'Status FAT': 'Port Full📕' } }) === 'fullBook', getFATSymbolKey({ dataFatFull: { 'Status FAT': 'Port Full📕' } }));
+    ok('baca dari dataFatFull["Status FDT"]', getFATSymbolKey({ dataFatFull: { 'Status FDT': 'Port Full📕' } }) === 'fullBook', getFATSymbolKey({ dataFatFull: { 'Status FDT': 'Port Full📕' } }));
+
+    // 2) Bentuk & warna image marker
+    function measureShape(img) {
+        //ukur lebar baris paling atas & paling bawah dari canvas marker (koordinat device pixel)
+        const cvs = img.getImage ? img.getImage() : img;
+        const c = document.createElement('canvas');
+        c.width = cvs.width; c.height = cvs.height;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(cvs, 0, 0);
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+        let topW = 0, botW = 0, seenTop = false;
+        for (let y = 0; y < c.height; y++) {
+            let minX = -1, maxX = -1;
+            for (let x = 0; x < c.width; x++) {
+                if (data[(y * c.width + x) * 4 + 3] > 128) { if (minX < 0) minX = x; maxX = x; }
+            }
+            if (minX >= 0) { if (!seenTop) { topW = maxX - minX + 1; seenTop = true; } botW = maxX - minX + 1; }
+        }
+        return { topW: topW, botW: botW, canvasW: c.width, canvasH: c.height };
+    }
+
+    SAMPLES.forEach(s => {
+        const st = createMarkerStyle({ status: s.status });
+        const img = st.getImage();
+        const isCircle = img instanceof ol.style.Circle;
+        const isRegular = img instanceof ol.style.RegularShape;
+        const shapeOk = s.expectShape === 'circle' ? isCircle : (isRegular && !isCircle);
+        const color = imgFill(img);
+        ok('shape "' + s.status + '" = ' + s.expectShape, shapeOk, isCircle ? 'Circle' : (isRegular ? 'RegularShape' : typeof img));
+        ok('color "' + s.status + '" = ' + s.expectColor, String(color).toLowerCase() === s.expectColor, color);
+        if (s.expectShape === 'triangle') {
+            const m = measureShape(img);
+            ok('segitiga "' + s.status + '" menghadap atas (ujung atas sempit)', m.topW < m.botW, JSON.stringify(m));
+            // lebar segitiga dibanding diameter lingkaran (radius 7 -> 14px)
+            const circleImg = createMarkerStyle({ status: 'Port Available🟢' }).getImage();
+            const circleCv = document.createElement('canvas');
+            circleCv.width = circleImg.getImage().width; circleCv.height = circleImg.getImage().height;
+            const cc = circleCv.getContext('2d');
+            cc.drawImage(circleImg.getImage(), 0, 0);
+            const cd = cc.getImageData(0, 0, circleCv.width, circleCv.height).data;
+            let circleW = 0;
+            for (let y = 0; y < circleCv.height; y++) {
+                let minX = -1, maxX = -1;
+                for (let x = 0; x < circleCv.width; x++) { if (cd[(y * circleCv.width + x) * 4 + 3] > 128) { if (minX < 0) minX = x; maxX = x; } }
+                if (minX >= 0) circleW = Math.max(circleW, maxX - minX + 1);
+            }
+            const ratio = m.botW / circleW;
+            ok('lebar segitiga ≈ diameter lingkaran (rasio 0.8-1.1)', ratio >= 0.8 && ratio <= 1.1, 'tri=' + m.botW + 'px circle=' + circleW + 'px ratio=' + ratio.toFixed(2));
+        }
+    });
+
+    function imgFill(img) {
+        const fill = img.getFill && img.getFill();
+        return fill ? fill.getColor() : null;
+    }
+
+    // 3) Render visual: satu marker per simbol di peta
+    // window.map harus instance ol.Map; elemen <div id="map"> otomatis jadi window.map, jadi timpa eksplisit.
+    window.map = new ol.Map({
+        target: 'map',
+        view: new ol.View({ center: ol.proj.fromLonLat([112.73, -7.33]), zoom: 12 })
+    });
+    createCustomerLayer();
+
+    const list = SAMPLES.map((s, i) => ({
+        id: 'T' + (i + 1),
+        label: s.status,
+        status: s.status,
+        city: 'Kota Surabaya',
+        // minimal 2 desimal agar lolos hasValidCustomerCoordinates (String(-7.30) => "-7.3" hanya 1 desimal)
+        latitude: Number((-7.3015 + (i % 4) * 0.0123).toFixed(4)),
+        longitude: Number((112.7011 + Math.floor(i / 4) * 0.0234).toFixed(4))
+    }));
+    drawCustomers(list, { expandGroups: true, ignoreViewport: true });
+
+    const feats = (customerExpandedSource && customerExpandedSource.getFeatures().length)
+        ? customerExpandedSource.getFeatures()
+        : customerSource.getFeatures();
+    ok('jumlah feature digambar = 8', feats.length === 8, feats.length);
+
+    // 4) Style function layer (jalur render sebenarnya) menghasilkan bentuk sesuai simbol
+    const styleFn = customerLayer.getStyle();
+    const seen = {};
+    feats.forEach(f => {
+        const c = f.get('customer');
+        const img = styleFn(f).getImage();
+        const isCircle = img instanceof ol.style.Circle;
+        const expectedShape = FAT_STATUS_SYMBOL_CONFIG[getFATSymbolKey(c)].shape;
+        seen[getFATSymbolKey(c)] = (isCircle ? 'circle' : (FAT_STATUS_SYMBOL_CONFIG[getFATSymbolKey(c)].shape || 'polygon'));
+        ok('styleFunction "' + c.status + '" -> ' + expectedShape,
+            (expectedShape === 'circle') === isCircle,
+            isCircle ? 'Circle' : 'RegularShape');
+    });
+
+    const workbookRow = {
+        'CITY': 'KOTA SURABAYA',
+        'PROVINCE': 'JAWA TIMUR',
+        'SITE_ID': 'SITE-01',
+        'IOH BUSINESS AREA': 'EAST',
+        'CLUSTER NAME': 'SURABAYA',
+        'FAT CODE OLD': 'FAT-OLD-01',
+        'Check ID FAT': 'CHECK-01',
+        'FAT_LATITUDE': '-7.27497007',
+        'FAT_LONGITUDE': '112.75278714',
+        'User Latitude': '-7.30000000',
+        'User Longitude': '112.80000000',
+        'Update FAT': '2026-11-01',
+        'Update Installation': '2026-11-02',
+        'Total Port': '16',
+        'Total Used': '9',
+        'Total Idle': '7',
+        'Sourch Data': 'Data FAT Full.xlsx',
+        'Status FAT': 'Port Available📗'
+    };
+    const workbookMapping = resolveFATHeaders([workbookRow]);
+    const workbookCoordinates = getFATRowCoordinates(workbookRow, workbookMapping);
+    ok('koordinat marker mengikuti FAT LATITUDE/LONGITUDE workbook',
+        Math.abs(workbookCoordinates.latitude + 7.27497007) < 1e-6 &&
+        Math.abs(workbookCoordinates.longitude - 112.75278714) < 1e-6,
+        JSON.stringify(workbookCoordinates));
+    const fallbackCoordinates = getFATRowCoordinates({
+        ...workbookRow,
+        'FAT_LATITUDE': '',
+        'FAT_LONGITUDE': ''
+    }, workbookMapping);
+    ok('koordinat pengguna dipakai hanya jika koordinat FAT tidak valid',
+        Math.abs(fallbackCoordinates.latitude + 7.3) < 1e-6 &&
+        Math.abs(fallbackCoordinates.longitude - 112.8) < 1e-6,
+        JSON.stringify(fallbackCoordinates));
+
+    const popup = document.createElement('div');
+    popup.id = 'popup-content';
+    document.body.appendChild(popup);
+    showCustomerPopup(parseFATRow(workbookRow, workbookMapping, 0));
+    const popupRows = Array.from(popup.querySelectorAll('.customer-popup > table tr'), row => ({
+        label: row.cells[0]?.textContent.trim(),
+        value: row.cells[1]?.textContent.trim()
+    }));
+    const expectedHeaders = [
+        'CITY', 'PROVINCE', 'SITE ID', 'IOH BUSINESS AREA', 'CLUSTER NAME',
+        'FAT CODE OLD', 'Check ID FAT', 'FAT LATITUDE', 'FAT LONGITUDE',
+        'Update FAT', 'Update Installation', 'Sourch Data'
+    ];
+    ok('popup marker mengikuti urutan kolom detail workbook',
+        JSON.stringify(popupRows.map(row => row.label)) === JSON.stringify(expectedHeaders),
+        JSON.stringify(popupRows.map(row => row.label)));
+    const portTable = popup.querySelector('.fat-details-table');
+    const portHeaders = Array.from(portTable.querySelectorAll('thead th'), cell => cell.textContent.trim());
+    const portValues = Array.from(portTable.querySelectorAll('tbody td'), cell => cell.textContent.trim());
+    ok('tabel port marker memiliki kolom sesuai urutan',
+        JSON.stringify(portHeaders) === JSON.stringify(['Total Port', 'Total Used', 'Total Idle', 'Status FAT']),
+        JSON.stringify(portHeaders));
+    ok('tabel port marker menampilkan nilai workbook',
+        JSON.stringify(portValues) === JSON.stringify(['16', '9', '7', 'Port Available📗']),
+        JSON.stringify(portValues));
+    ok('popup marker menampilkan nilai kolom Sourch Data',
+        popupRows[11]?.value === 'Data FAT Full.xlsx',
+        popupRows[11]?.value);
+    popup.remove();
+
+    lines.push('');
+    lines.push('Ringkasan bentuk ter-render: ' + JSON.stringify(seen));
+    lines.push('<b>' + (fail === 0 ? 'SEMUA LULUS' : fail + ' GAGAL') + '</b> (' + pass + ' pass / ' + fail + ' fail)');
+    out.innerHTML = lines.join('\n');
+})();
+</script>
+</body>
+</html>
