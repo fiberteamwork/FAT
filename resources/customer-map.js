@@ -4956,12 +4956,23 @@ function deduplicateCustomerMarkers(items) {
     let duplicateCount = 0;
 
     for (const item of items) {
+        const dataType = item.dataType || 'FAT';
+        const rawData = item.dataFatFull && typeof item.dataFatFull === 'object'
+            ? item.dataFatFull
+            : null;
+        const fatCode = rawData
+            ? Object.entries(rawData).find(([field]) =>
+                normalize(field).replace(/_/g, ' ').toLowerCase() === 'fat code old'
+            )?.[1]
+            : '';
+        const preserveFATRecord = String(dataType).toUpperCase() === 'FAT' && String(fatCode ?? '').trim() !== '';
         const key = JSON.stringify([
-            item.dataType || 'FAT',
+            dataType,
             String(item.label || item.id || '').trim().toUpperCase(),
             String(item.siteId || item.dataFatFull?.['Site ID'] || '').trim().toUpperCase(),
             Number(item.latitude),
-            Number(item.longitude)
+            Number(item.longitude),
+            preserveFATRecord ? rawData : null
         ]);
         const existing = markers.get(key);
         if (existing) {
