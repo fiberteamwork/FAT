@@ -462,15 +462,21 @@ function normalizeFATCoordinates(latitude, longitude){
 }
 
 function getFATRowCoordinates(row, mapping){
-    const userLat = sanitizeNumberString(mapping.userLatitude ? (row[mapping.userLatitude] ?? '') : '');
-    const userLon = sanitizeNumberString(mapping.userLongitude ? (row[mapping.userLongitude] ?? '') : '');
-    let lat = sanitizeNumberString(mapping.latitude ? (row[mapping.latitude] ?? '') : '');
-    let lon = sanitizeNumberString(mapping.longitude ? (row[mapping.longitude] ?? '') : '');
-    if (isWithinIndonesiaBounds(userLat, userLon)) {
-        lat = userLat;
-        lon = userLon;
+    const fatCoordinates = normalizeFATCoordinates(
+        sanitizeNumberString(mapping.latitude ? (row[mapping.latitude] ?? '') : ''),
+        sanitizeNumberString(mapping.longitude ? (row[mapping.longitude] ?? '') : '')
+    );
+    if (isWithinIndonesiaBounds(fatCoordinates.latitude, fatCoordinates.longitude)) {
+        return fatCoordinates;
     }
-    return normalizeFATCoordinates(lat, lon);
+
+    const userCoordinates = normalizeFATCoordinates(
+        sanitizeNumberString(mapping.userLatitude ? (row[mapping.userLatitude] ?? '') : ''),
+        sanitizeNumberString(mapping.userLongitude ? (row[mapping.userLongitude] ?? '') : '')
+    );
+    return isWithinIndonesiaBounds(userCoordinates.latitude, userCoordinates.longitude)
+        ? userCoordinates
+        : fatCoordinates;
 }
 
 function buildSiteCoordinateIndex(rawRows, mapping){
@@ -2922,15 +2928,13 @@ Number.isFinite(customer.longitude)
         'update fat': ['update fat', 'update fdt', 'survey date', 'tanggal fat', 'tanggal'],
         'update fdt': ['update fdt', 'update fat', 'survey date'],
         'update installation': ['update installation', 'installation date'],
-        'jumlah pelanggan baru': ['jumlah pelanggan baru'],
-        'project site': ['project site'],
-        'total used (visual)': ['total used (visual)', 'total used visual', 'total used'],
-        'total idle (visual)': ['total idle (visual)', 'total idle visual', 'total idle'],
-        'status port': ['status port', 'status fat', 'status fdt', 'status'],
+        'total used': ['total used', 'total used (visual)', 'total used visual'],
+        'total idle': ['total idle', 'total idle (visual)', 'total idle visual'],
         'status fat': ['status fat', 'status fdt', 'status port', 'status'],
         'province': ['province', 'provinsi'],
         'ioh business area': ['ioh business area', 'business area'],
         'cluster name': ['cluster name'],
+        'source data': ['source data', 'sourch data'],
         'fat code old': ['fat code old', 'label fat old', 'label fat new', 'fdt code survey'],
         'check id fat': ['check id fat', 'check id fdt'],
         'fat latitude': ['fat latitude', 'fdt latitude', 'latitude'],
@@ -2950,75 +2954,51 @@ Number.isFinite(customer.longitude)
         const text = String(value ?? '').trim();
         return text ? escapeHtml(text) : '-';
     };
-    const additionalDetails = [
-        { label: findRawKey('Check ID FAT') || 'Check ID FAT', field: 'Check ID FAT' },
-        { label: 'PROVINCE', field: 'PROVINCE' },
-        { label: 'IOH BUSINESS AREA', field: 'IOH BUSINESS AREA' },
-        { label: 'CLUSTER NAME', field: 'CLUSTER NAME' },
-        { label: findRawKey('FAT LATITUDE') || 'FAT LATITUDE', field: 'FAT LATITUDE' },
-        { label: findRawKey('FAT LONGITUDE') || 'FAT LONGITUDE', field: 'FAT LONGITUDE' },
-        { label: findRawKey('Update FAT') || 'Update FAT', field: 'Update FAT' },
-        { label: 'Update Installation', field: 'Update Installation' },
-        { label: 'Jumlah Pelanggan Baru', field: 'Jumlah Pelanggan Baru' },
-        { label: 'Project Site', field: 'Project Site' }
-    ].filter(({ field }) => findRawKey(field));
-    const additionalRows = additionalDetails.map(({ label, field }) => `
+    const markerDetails = [
+        ['CITY', getRawValue('CITY') || customer.city],
+        ['PROVINCE', getRawValue('PROVINCE')],
+        ['SITE ID', getRawValue('SITE ID') || customer.siteId],
+        ['IOH BUSINESS AREA', getRawValue('IOH BUSINESS AREA')],
+        ['CLUSTER NAME', getRawValue('CLUSTER NAME')],
+        ['FAT CODE OLD', getRawValue('FAT CODE OLD') || customer.label || customer.username || idDisplay],
+        ['Check ID FAT', getRawValue('Check ID FAT') || customer.id],
+        ['FAT LATITUDE', getRawValue('FAT LATITUDE') || customer.latitude],
+        ['FAT LONGITUDE', getRawValue('FAT LONGITUDE') || customer.longitude],
+        ['Update FAT', getRawValue('Update FAT')],
+        ['Update Installation', getRawValue('Update Installation')],
+        ['Sourch Data', getRawValue('Source Data')],
+    ];
+    const markerRows = markerDetails.map(([label, value]) => `
                 <tr>
                     <td>${escapeHtml(label)}</td>
-                    <td>${displayValue(getRawValue(field))}</td>
+                    <td>${displayValue(value)}</td>
                 </tr>
     `).join('');
-    const statusHeader = findRawKey('Status FDT') || findRawKey('Status FAT') || 'Status FAT';
-    const detailFields = [
-        ...(findRawKey('Jumlah Splitter') ? ['Jumlah Splitter'] : []),
-        'Total Port',
-        'Total Used',
-        'Total Idle',
-        statusHeader
+    const portDetails = [
+        ['Total Port', getRawValue('Total Port')],
+        ['Total Used', getRawValue('Total Used')],
+        ['Total Idle', getRawValue('Total Idle')],
+        ['Status FAT', getRawValue('Status FAT') || customer.status]
     ];
-    const siteId = customer.siteId || getRawValue('Site ID');
-    const detailHeaders = detailFields.map(header =>
-        `<th scope="col">${escapeHtml(header)}</th>`
+    const portHeaders = portDetails.map(([label]) =>
+        `<th scope="col">${escapeHtml(label)}</th>`
     ).join('');
-    const detailValues = detailFields.map(header =>
-        `<td>${displayValue(getRawValue(header))}</td>`
+    const portValues = portDetails.map(([, value]) =>
+        `<td>${displayValue(value)}</td>`
     ).join('');
-    const labelHeader = findRawKey('FAT CODE OLD') || 'Label';
-    const siteName = normalizeKey(customer.site) !== normalizeKey(siteId) ? customer.site : '';
 
     popup.innerHTML = `
 
         <div class="customer-popup">
             <table>
-                <tr>
-                    <td>${escapeHtml(labelHeader)}</td>
-                    <td>${escapeHtml(customer.label || customer.username || idDisplay)}</td>
-                </tr>
-                <tr>
-                    <td>Site ID</td>
-                    <td>${displayValue(siteId)}</td>
-                </tr>
-                <tr>
-                    <td>Kota/Kabupaten</td>
-                    <td>${displayValue(customer.city)}</td>
-                </tr>
-                <tr>
-                    <td>Nama Site</td>
-                    <td>${displayValue(siteName)}</td>
-                </tr>
-                ${additionalRows}
+                ${markerRows}
             </table>
-            <div class="fat-details-table-scroll" style="max-width:100%; overflow-x:auto; margin-top:8px;">
-                <table class="fat-details-table" style="min-width:650px; width:100%; border-collapse:collapse;">
-                    <thead>
-                        <tr>${detailHeaders}</tr>
-                    </thead>
-                    <tbody>
-                        <tr>${detailValues}</tr>
-                    </tbody>
+            <div class="fat-details-table-scroll">
+                <table class="fat-details-table">
+                    <thead><tr>${portHeaders}</tr></thead>
+                    <tbody><tr>${portValues}</tr></tbody>
                 </table>
             </div>
-
             ${gps}
 
         </div>
