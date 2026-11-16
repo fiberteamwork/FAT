@@ -23,7 +23,7 @@ window.dashboardAuthReady = new Promise(function () {});
 </script>
 <script src="./resources/xlsx-lite.js"></script>
 <script src="./resources/ol.js"></script>
-<script src="./resources/customer-map.js?v=20261116.5"></script>
+<script src="./resources/customer-map.js?v=20261116.10"></script>
 <script>
 (async function () {
     const out = document.getElementById('out');
@@ -58,6 +58,12 @@ window.dashboardAuthReady = new Promise(function () {});
     // fallback via dataFatFull ketika .status kosong
     ok('baca dari dataFatFull["Status FAT"]', getFATSymbolKey({ dataFatFull: { 'Status FAT': 'Port Full📕' } }) === 'fullBook', getFATSymbolKey({ dataFatFull: { 'Status FAT': 'Port Full📕' } }));
     ok('baca dari dataFatFull["Status FDT"]', getFATSymbolKey({ dataFatFull: { 'Status FDT': 'Port Full📕' } }) === 'fullBook', getFATSymbolKey({ dataFatFull: { 'Status FDT': 'Port Full📕' } }));
+    ok('status FDT diprioritaskan dibanding kolom Status FAT lama',
+        getFATSymbolKey({ dataType: 'FDT', dataFatFull: { 'Status FAT': 'Port ODC Full📕', 'Status FDT': 'Port ODC Available📗' } }) === 'availableBook',
+        getFATSymbolKey({ dataType: 'FDT', dataFatFull: { 'Status FAT': 'Port ODC Full📕', 'Status FDT': 'Port ODC Available📗' } }));
+    ok('status port FDT memakai Status FDT untuk filter dan ringkasan',
+        getPortStatusKey({ dataType: 'FDT', dataFatFull: { 'Status FAT': 'Port ODC Full📕', 'Status FDT': 'Port ODC Available📗' } }) === 'odcAvailable',
+        getPortStatusKey({ dataType: 'FDT', dataFatFull: { 'Status FAT': 'Port ODC Full📕', 'Status FDT': 'Port ODC Available📗' } }));
 
     // 2) Bentuk & warna image marker
     function measureShape(img) {
@@ -265,7 +271,8 @@ window.dashboardAuthReady = new Promise(function () {});
         'Total Port': '16',
         'Total Used ': '9',
         'Total Idle ': '7',
-        'Status FDT': 'Port Full📕'
+        'Sourch Data': 'Ho_W44',
+        'Status FAT': 'Port Full📕'
     };
     const fdtMapping = resolveFATHeaders([fdtRow]);
     const fdtCustomer = parseFATRow(fdtRow, fdtMapping, 0);
@@ -281,17 +288,45 @@ window.dashboardAuthReady = new Promise(function () {});
     const fdtValues = Array.from(fdtPopup.querySelectorAll('.fat-details-table tbody td'), cell => cell.textContent.trim());
     const expectedFdtHeaders = [
         'CITY', 'PROVINCE', 'SITE ID', 'IOH BUSINESS AREA', 'CLUSTER NAME',
-        'FDT CODE SURVEY', 'Check ID FDT', 'FDT LATITUDE', 'FDT LONGITUDE', 'Update FDT'
+        'FDT CODE SURVEY', 'Check ID FDT', 'FDT LATITUDE', 'FDT LONGITUDE', 'Update FDT', 'Sourch Data'
     ];
     ok('popup marker FDT mengikuti label kolom workbook',
         fdtCustomer.dataType === 'FDT' &&
-        JSON.stringify(fdtRows.map(row => row.label)) === JSON.stringify(expectedFdtHeaders),
-        JSON.stringify({ dataType: fdtCustomer.dataType, headers: fdtRows.map(row => row.label) }));
+        JSON.stringify(fdtRows.map(row => row.label)) === JSON.stringify(expectedFdtHeaders) &&
+        fdtRows[fdtRows.length - 1]?.value === 'Ho_W44',
+        JSON.stringify({ dataType: fdtCustomer.dataType, rows: fdtRows }));
     ok('tabel marker FDT menampilkan splitter dan status FDT',
-        JSON.stringify(fdtHeaders) === JSON.stringify(['Jumlah Splitter', 'Total Port', 'Total Used', 'Total Idle', 'Status FDT']) &&
+        JSON.stringify(fdtHeaders) === JSON.stringify(['Jumlah Splitter', 'Total Port', 'Total Used', 'Total Idle', 'Status FAT']) &&
         JSON.stringify(fdtValues) === JSON.stringify(['4', '16', '9', '7', 'Port Full📕']),
         JSON.stringify({ headers: fdtHeaders, values: fdtValues }));
     fdtPopup.remove();
+
+    const fdtWithLegacyAndSpecificFields = {
+        ...fdtRow,
+        'FAT CODE OLD': 'FAT-STALE',
+        'Check ID FAT': 'CHECK-FAT-STALE',
+        'FAT LATITUDE': '-7.500000',
+        'FAT LONGITUDE': '112.900000',
+        'Update FAT': '2025-01-01',
+        'Status FAT': 'Port ODC Full📕',
+        'FDT CODE SURVEY': 'FDT-CURRENT',
+        'Check ID FDT': 'CHECK-FDT-CURRENT',
+        'FDT LATITUDE': '-7.27497007',
+        'FDT LONGITUDE': '112.75278714',
+        'Update FDT': '2026-11-15',
+        'Status FDT': 'Port ODC Available📗'
+    };
+    const fdtSpecificMapping = resolveFATHeaders([fdtWithLegacyAndSpecificFields]);
+    const fdtSpecificCustomer = parseFATRow(fdtWithLegacyAndSpecificFields, fdtSpecificMapping, 0);
+    ok('pemetaan FDT memilih ID, kode, koordinat, tanggal, dan status FDT',
+        fdtSpecificCustomer.dataType === 'FDT' &&
+        fdtSpecificCustomer.id === 'CHECK-FDT-CURRENT' &&
+        fdtSpecificCustomer.label === 'FDT-CURRENT' &&
+        fdtSpecificCustomer.latitude === -7.27497007 &&
+        fdtSpecificCustomer.longitude === 112.75278714 &&
+        fdtSpecificCustomer.visitDate === '2026-11-15' &&
+        fdtSpecificCustomer.status === 'Port ODC Available📗',
+        JSON.stringify({ mapping: fdtSpecificMapping, customer: fdtSpecificCustomer }));
 
     const workbookResponse = await fetch('./data/Data FAT Full.xlsx');
     if (!workbookResponse.ok) throw new Error('Data FAT Full.xlsx gagal dimuat untuk uji marker.');
@@ -313,7 +348,11 @@ window.dashboardAuthReady = new Promise(function () {});
         document.body.appendChild(popup);
         showCustomerPopup(customer);
 
-        const details = Array.from(popup.querySelectorAll('.customer-popup > table tr'), row => row.cells[0]?.textContent.trim());
+        const detailRows = Array.from(popup.querySelectorAll('.customer-popup > table tr'), row => ({
+            label: row.cells[0]?.textContent.trim(),
+            value: row.cells[1]?.textContent.trim()
+        }));
+        const details = detailRows.map(row => row.label);
         const ports = Array.from(popup.querySelectorAll('.fat-details-table th'), cell => cell.textContent.trim());
         const values = Array.from(popup.querySelectorAll('.fat-details-table tbody td'), cell => cell.textContent.trim());
         const getSourceValue = header => {
@@ -323,21 +362,26 @@ window.dashboardAuthReady = new Promise(function () {});
         const typeMatches = customer.dataType === sheetName;
         const headersMatch = JSON.stringify(details) === JSON.stringify(expectedDetailHeaders) &&
             JSON.stringify(ports) === JSON.stringify(expectedPortHeaders);
+        const sourceDataMatches = sheetName !== 'FDT' || detailRows.some(row =>
+            row.label === 'Sourch Data' && row.value === getSourceValue('Sourch Data')
+        );
         const expectedValues = [
             ...(sheetName === 'FDT' ? [getSourceValue('Jumlah Splitter')] : []),
             getSourceValue('Total Port'),
             getSourceValue('Total Used'),
             getSourceValue('Total Idle'),
-            getSourceValue(sheetName === 'FAT' ? 'Status FAT' : 'Status FDT')
+            sheetName === 'FAT'
+                ? getSourceValue('Status FAT')
+                : getSourceValue('Status FDT') || getSourceValue('Status FAT')
         ];
         const valuesMatch = JSON.stringify(values) === JSON.stringify(expectedValues);
         ok(`popup marker memakai baris asli sheet ${sheetName}`,
-            typeMatches && headersMatch && valuesMatch,
+            typeMatches && headersMatch && valuesMatch && sourceDataMatches,
             JSON.stringify({ type: customer.dataType, details, ports, values }));
         popup.remove();
     };
     verifyWorkbookSheet('FAT', expectedHeaders, ['Total Port', 'Total Used', 'Total Idle', 'Status FAT']);
-    verifyWorkbookSheet('FDT', expectedFdtHeaders, ['Jumlah Splitter', 'Total Port', 'Total Used', 'Total Idle', 'Status FDT']);
+    verifyWorkbookSheet('FDT', expectedFdtHeaders, ['Jumlah Splitter', 'Total Port', 'Total Used', 'Total Idle', 'Status FAT']);
 
     lines.push('');
     lines.push('Ringkasan bentuk ter-render: ' + JSON.stringify(seen));
