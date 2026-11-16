@@ -22,7 +22,7 @@ pre { white-space: pre-wrap; word-break: break-all; }
 window.dashboardAuthReady = new Promise(function () {});
 </script>
 <script src="./resources/ol.js"></script>
-<script src="./resources/customer-map.js?v=20261116.3"></script>
+<script src="./resources/customer-map.js?v=20261116.4"></script>
 <script>
 (function () {
     const out = document.getElementById('out');
@@ -216,6 +216,49 @@ window.dashboardAuthReady = new Promise(function () {});
         popupRows[11]?.value === 'Data FAT Full.xlsx',
         popupRows[11]?.value);
     popup.remove();
+
+    const fdtRow = {
+        'CITY': 'KOTA SURABAYA',
+        'PROVINCE': 'JAWA TIMUR',
+        'SITE_ID': 'SITE-FDT-01',
+        'IOH BUSINESS AREA': 'EAST',
+        'CLUSTER NAME': 'SURABAYA',
+        'FDT CODE SURVEY': 'FDT-01',
+        'Check ID FDT': 'CHECK-FDT-01',
+        'FDT LATITUDE': '-7.27497007',
+        'FDT LONGITUDE': '112.75278714',
+        'Update FDT': '2026-11-03',
+        'Jumlah Splitter': '4',
+        'Total Port': '16',
+        'Total Used': '9',
+        'Total Idle': '7',
+        'Status FDT': 'Port Full📕'
+    };
+    const fdtMapping = resolveFATHeaders([fdtRow]);
+    const fdtCustomer = parseFATRow(fdtRow, fdtMapping, 0);
+    const fdtPopup = document.createElement('div');
+    fdtPopup.id = 'popup-content';
+    document.body.appendChild(fdtPopup);
+    showCustomerPopup(fdtCustomer);
+    const fdtRows = Array.from(fdtPopup.querySelectorAll('.customer-popup > table tr'), row => ({
+        label: row.cells[0]?.textContent.trim(),
+        value: row.cells[1]?.textContent.trim()
+    }));
+    const fdtHeaders = Array.from(fdtPopup.querySelectorAll('.fat-details-table th'), cell => cell.textContent.trim());
+    const fdtValues = Array.from(fdtPopup.querySelectorAll('.fat-details-table tbody td'), cell => cell.textContent.trim());
+    const expectedFdtHeaders = [
+        'CITY', 'PROVINCE', 'SITE ID', 'IOH BUSINESS AREA', 'CLUSTER NAME',
+        'FDT CODE SURVEY', 'Check ID FDT', 'FDT LATITUDE', 'FDT LONGITUDE', 'Update FDT'
+    ];
+    ok('popup marker FDT mengikuti label kolom workbook',
+        fdtCustomer.dataType === 'FDT' &&
+        JSON.stringify(fdtRows.map(row => row.label)) === JSON.stringify(expectedFdtHeaders),
+        JSON.stringify({ dataType: fdtCustomer.dataType, headers: fdtRows.map(row => row.label) }));
+    ok('tabel marker FDT menampilkan splitter dan status FDT',
+        JSON.stringify(fdtHeaders) === JSON.stringify(['Jumlah Splitter', 'Total Port', 'Total Used', 'Total Idle', 'Status FDT']) &&
+        JSON.stringify(fdtValues) === JSON.stringify(['4', '16', '9', '7', 'Port Full📕']),
+        JSON.stringify({ headers: fdtHeaders, values: fdtValues }));
+    fdtPopup.remove();
 
     lines.push('');
     lines.push('Ringkasan bentuk ter-render: ' + JSON.stringify(seen));
