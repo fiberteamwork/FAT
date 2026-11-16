@@ -13,6 +13,81 @@
     const byId = id => document.getElementById(id);
 
     let mapLoadPromise = null;
+    let workbookChangeTimer = null;
+    let workbookRevision = null;
+    const WORKBOOK_URL = './data/Data FAT Full.xlsx';
+    const WORKBOOK_CHECK_INTERVAL_MS = 30000;
+
+    function workbookHeaderRevision(headers) {
+        const etag = headers.get('ETag');
+        const lastModified = headers.get('Last-Modified');
+        if (!etag && !lastModified) return null;
+        return JSON.stringify([etag, lastModified, headers.get('Content-Length')]);
+    }
+
+    async function workbookContentRevision(buffer) {
+        if (window.crypto && window.crypto.subtle) {
+            const digest = await window.crypto.subtle.digest('SHA-256', buffer);
+            return 'content:' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        }
+
+        const bytes = new Uint8Array(buffer);
+        let hash = 2166136261;
+        for (const byte of bytes) hash = Math.imul(hash ^ byte, 16777619);
+        return `content:${bytes.length}:${hash >>> 0}`;
+    }
+
+    async function workbookRevisionFromResponse(response, buffer = null) {
+        const headerRevision = workbookHeaderRevision(response.headers);
+        if (headerRevision) return headerRevision;
+        const content = buffer || await response.arrayBuffer();
+        return workbookContentRevision(content);
+    }
+
+    async function readWorkbookRevision() {
+        const url = WORKBOOK_URL + '?check=' + Date.now();
+        const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        if (!response.ok) throw new Error('Data FAT gagal diperiksa. HTTP ' + response.status);
+
+        const headerRevision = workbookHeaderRevision(response.headers);
+        if (headerRevision) return headerRevision;
+
+        const workbookResponse = await fetch(url, { cache: 'no-store' });
+        if (!workbookResponse.ok) {
+            throw new Error('Data FAT gagal diperiksa. HTTP ' + workbookResponse.status);
+        }
+        return workbookRevisionFromResponse(workbookResponse);
+    }
+
+    function startWorkbookChangeMonitor() {
+        if (workbookChangeTimer !== null) return;
+
+        const checkWorkbook = async () => {
+            try {
+                const currentRevision = await readWorkbookRevision();
+                if (workbookRevision !== null && currentRevision !== workbookRevision) {
+                    if (!document.body.classList.contains('auth-ready')) {
+                        workbookChangeTimer = window.setTimeout(checkWorkbook, WORKBOOK_CHECK_INTERVAL_MS);
+                        return;
+                    }
+                    console.info('[MAP] File Data FAT Full.xlsx berubah; memuat ulang marker.');
+                    const loadingMessage = byId('map-loading-message');
+                    const loadingStatus = byId('map-loading');
+                    if (loadingMessage) loadingMessage.textContent = 'Data Excel berubah. Memuat ulang marker...';
+                    if (loadingStatus) loadingStatus.hidden = false;
+                    window.location.reload();
+                    return;
+                }
+                workbookRevision = currentRevision;
+            } catch (error) {
+                console.warn('[MAP] Pemeriksaan perubahan Data FAT gagal; akan dicoba kembali.', error);
+            }
+
+            workbookChangeTimer = window.setTimeout(checkWorkbook, WORKBOOK_CHECK_INTERVAL_MS);
+        };
+
+        workbookChangeTimer = window.setTimeout(checkWorkbook, WORKBOOK_CHECK_INTERVAL_MS);
+    }
 
     function loadMapApplication() {
         if (mapLoadPromise) return mapLoadPromise;
@@ -34,7 +109,7 @@
             'resources/Autolinker.min.js',
             'resources/qgis2web.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'resources/customer-map.js?v=20261116.4'
+            'resources/customer-map.js?v=20261116.10'
         ];
 
         const loadingMessage = byId('map-loading-message');
@@ -45,7 +120,10 @@
             cache: 'no-cache'
         }).then(response => {
             if (!response.ok) throw new Error('Data FAT gagal dimuat. HTTP ' + response.status);
-            return response.arrayBuffer();
+            return response.arrayBuffer().then(async buffer => {
+                workbookRevision = await workbookRevisionFromResponse(response, buffer);
+                return buffer;
+            });
         }).catch(error => {
             console.warn('[MAP] Prefetch data FAT gagal; akan dicoba kembali saat peta siap.', error);
             return null;
@@ -63,6 +141,9 @@
                 loadingMessage.textContent = 'Peta gagal dimuat. Periksa koneksi lalu muat ulang halaman.';
             }
             return null;
+        });
+        mapLoadPromise.then(result => {
+            if (result !== null) window.customerDataPreload.then(startWorkbookChangeMonitor);
         });
 
         return mapLoadPromise;
