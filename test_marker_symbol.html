@@ -21,10 +21,11 @@ pre { white-space: pre-wrap; word-break: break-all; }
 // agar removeStaleCustomerLayers di dalam loadData tidak menghapus layer uji.
 window.dashboardAuthReady = new Promise(function () {});
 </script>
+<script src="./resources/xlsx-lite.js"></script>
 <script src="./resources/ol.js"></script>
-<script src="./resources/customer-map.js?v=20261116.4"></script>
+<script src="./resources/customer-map.js?v=20261116.5"></script>
 <script>
-(function () {
+(async function () {
     const out = document.getElementById('out');
     const lines = [];
     let pass = 0, fail = 0;
@@ -166,8 +167,8 @@ window.dashboardAuthReady = new Promise(function () {});
         'Update FAT': '2026-11-01',
         'Update Installation': '2026-11-02',
         'Total Port': '16',
-        'Total Used': '9',
-        'Total Idle': '7',
+        'Total Used ': '9',
+        'Total Idle ': '7',
         'Sourch Data': 'Data FAT Full.xlsx',
         'Status FAT': 'Port Available📗'
     };
@@ -217,6 +218,38 @@ window.dashboardAuthReady = new Promise(function () {});
         popupRows[11]?.value);
     popup.remove();
 
+    const sameCodeFullRow = {
+        ...workbookRow,
+        'Check ID FAT': 'CHECK-02',
+        'Total Used ': '0',
+        'Total Idle ': '8',
+        'Status FAT': 'Port FAT Full🔴'
+    };
+    const sameCodeAvailableRow = {
+        ...workbookRow,
+        'Check ID FAT': 'CHECK-03',
+        'Total Used ': '8',
+        'Total Idle ': '0',
+        'Status FAT': 'Port FAT Available🟢'
+    };
+    const sameCodeMarkers = deduplicateCustomerMarkers([
+        parseFATRow(sameCodeFullRow, workbookMapping, 1),
+        parseFATRow(sameCodeAvailableRow, workbookMapping, 2)
+    ]);
+    ok('FAT CODE OLD sama tidak menggabungkan record berbeda',
+        sameCodeMarkers.length === 2 &&
+        sameCodeMarkers[0].dataFatFull['Total Used '] === '0' &&
+        sameCodeMarkers[0].dataFatFull['Status FAT'] === 'Port FAT Full🔴' &&
+        sameCodeMarkers[1].dataFatFull['Total Used '] === '8' &&
+        sameCodeMarkers[1].dataFatFull['Status FAT'] === 'Port FAT Available🟢',
+        JSON.stringify(sameCodeMarkers.map(marker => ({
+            used: marker.dataFatFull['Total Used '],
+            idle: marker.dataFatFull['Total Idle '],
+            status: marker.dataFatFull['Status FAT']
+        }))));
+    ok('record FAT yang benar-benar identik tetap dideduplikasi',
+        deduplicateCustomerMarkers([sameCodeMarkers[0], { ...sameCodeMarkers[0] }]).length === 1);
+
     const fdtRow = {
         'CITY': 'KOTA SURABAYA',
         'PROVINCE': 'JAWA TIMUR',
@@ -230,8 +263,8 @@ window.dashboardAuthReady = new Promise(function () {});
         'Update FDT': '2026-11-03',
         'Jumlah Splitter': '4',
         'Total Port': '16',
-        'Total Used': '9',
-        'Total Idle': '7',
+        'Total Used ': '9',
+        'Total Idle ': '7',
         'Status FDT': 'Port Full📕'
     };
     const fdtMapping = resolveFATHeaders([fdtRow]);
@@ -259,6 +292,52 @@ window.dashboardAuthReady = new Promise(function () {});
         JSON.stringify(fdtValues) === JSON.stringify(['4', '16', '9', '7', 'Port Full📕']),
         JSON.stringify({ headers: fdtHeaders, values: fdtValues }));
     fdtPopup.remove();
+
+    const workbookResponse = await fetch('./data/Data FAT Full.xlsx');
+    if (!workbookResponse.ok) throw new Error('Data FAT Full.xlsx gagal dimuat untuk uji marker.');
+    const workbook = await XLSXLite.read(await workbookResponse.arrayBuffer());
+    const verifyWorkbookSheet = (sheetName, expectedDetailHeaders, expectedPortHeaders) => {
+        const rows = XLSXLite.sheetToObjects(workbook.sheets[sheetName]);
+        const source = rows.find(row =>
+            row['CITY'] && row['SITE ID'] &&
+            row[sheetName === 'FAT' ? 'FAT CODE OLD' : 'FDT CODE SURVEY'] &&
+            row[sheetName === 'FAT' ? 'FAT LATITUDE' : 'FDT LATITUDE'] &&
+            row[sheetName === 'FAT' ? 'FAT LONGITUDE' : 'FDT LONGITUDE']
+        );
+        if (!source) throw new Error(`Sheet ${sheetName} tidak memiliki baris FAT/FDT lengkap untuk diuji.`);
+
+        const mapping = resolveFATHeaders(rows);
+        const customer = parseFATRow(source, mapping, 0);
+        const popup = document.createElement('div');
+        popup.id = 'popup-content';
+        document.body.appendChild(popup);
+        showCustomerPopup(customer);
+
+        const details = Array.from(popup.querySelectorAll('.customer-popup > table tr'), row => row.cells[0]?.textContent.trim());
+        const ports = Array.from(popup.querySelectorAll('.fat-details-table th'), cell => cell.textContent.trim());
+        const values = Array.from(popup.querySelectorAll('.fat-details-table tbody td'), cell => cell.textContent.trim());
+        const getSourceValue = header => {
+            const key = Object.keys(source).find(item => normalize(item) === normalize(header));
+            return key ? String(source[key] ?? '').trim() : '';
+        };
+        const typeMatches = customer.dataType === sheetName;
+        const headersMatch = JSON.stringify(details) === JSON.stringify(expectedDetailHeaders) &&
+            JSON.stringify(ports) === JSON.stringify(expectedPortHeaders);
+        const expectedValues = [
+            ...(sheetName === 'FDT' ? [getSourceValue('Jumlah Splitter')] : []),
+            getSourceValue('Total Port'),
+            getSourceValue('Total Used'),
+            getSourceValue('Total Idle'),
+            getSourceValue(sheetName === 'FAT' ? 'Status FAT' : 'Status FDT')
+        ];
+        const valuesMatch = JSON.stringify(values) === JSON.stringify(expectedValues);
+        ok(`popup marker memakai baris asli sheet ${sheetName}`,
+            typeMatches && headersMatch && valuesMatch,
+            JSON.stringify({ type: customer.dataType, details, ports, values }));
+        popup.remove();
+    };
+    verifyWorkbookSheet('FAT', expectedHeaders, ['Total Port', 'Total Used', 'Total Idle', 'Status FAT']);
+    verifyWorkbookSheet('FDT', expectedFdtHeaders, ['Jumlah Splitter', 'Total Port', 'Total Used', 'Total Idle', 'Status FDT']);
 
     lines.push('');
     lines.push('Ringkasan bentuk ter-render: ' + JSON.stringify(seen));
