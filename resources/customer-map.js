@@ -119,15 +119,23 @@ const ODC_STATUS_KEYS = ["odcAvailable", "odcFull"];
 
 const PORT_STATUS_FILTER_KEYS = ["full", "available", "noData", "needCheck", "needUpdateSystem", "unavailable", "odcAvailable", "odcFull"];
 
+function getCustomerStatusValue(customer) {
+    const data = customer?.dataFatFull;
+    const isFdt = String(customer?.dataType || '').toUpperCase() === 'FDT';
+    const fields = isFdt
+        ? ["Status FDT", "Status FAT", "Status Port"]
+        : ["Status FAT", "Status FDT", "Status Port"];
+
+    for (const field of fields) {
+        const value = data?.[field];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+    }
+
+    return customer?.statusPort ?? customer?.status ?? '';
+}
+
 function getPortStatusKey(customer) {
-    const explicit = String(
-        customer?.dataFatFull?.["Status FAT"] ??
-        customer?.dataFatFull?.["Status FDT"] ??
-        customer?.dataFatFull?.["Status Port"] ??
-        customer?.statusPort ??
-        customer?.status ??
-        ""
-    ).trim().toLowerCase();
+    const explicit = String(getCustomerStatusValue(customer)).trim().toLowerCase();
 
     if (explicit.includes("unavailable")) return "unavailable";
     // Status ODC dicek sebelum "full"/"available" karena teksnya juga mengandung kata itu
@@ -185,12 +193,7 @@ const FAT_STATUS_SYMBOL_CONFIG = {
 
 // Kunci symbol Status FAT untuk satu customer (emoji dulu, fallback teks dasar)
 function getFATSymbolKey(customer) {
-    const raw = String(
-        customer?.status ||
-        customer?.dataFatFull?.["Status FAT"] ||
-        customer?.dataFatFull?.["Status FDT"] ||
-        ""
-    ).trim();
+    const raw = String(getCustomerStatusValue(customer)).trim();
     if (!raw) return "unknown";
 
     for (const emoji of Object.keys(FAT_STATUS_EMOJI)) {
@@ -684,7 +687,7 @@ const FAT_HEADER_ALIASES = {
     district:  ["kecamatan", "kec", "district"],
     ward:      ["kelurahan", "desa", "kel", "ward", "village"],
     site:      ["nama site", "namasite", "site", "site name", "nama sisi", "sisi", "lokasi site"],
-    status:    ["status fat", "status", "keterangan fat", "jenis", "jenis fat", "kategori", "tipe", "fat/non fat"],
+    status:    ["status fat", "status fdt", "status", "keterangan fat", "jenis", "jenis fat", "kategori", "tipe", "fat/non fat"],
     ket:       ["keterangan", "ket", "catatan", "note", "notes", "remark"],
     visitDate: ["update fat", "update fdt", "tanggal", "tgl", "tanggal visit", "tgl visit", "visit date", "tanggal fat", "tgl fat", "survey date", "date"],
     latitude:  ["fat latitude", "fdt latitude", "latitude", "lat", "koordinat latitude", "lintang", "y"],
@@ -758,6 +761,30 @@ function resolveFATHeaders(rawRows) {
         : hasHeader(["fat code old", "check id fat", "fat_latitude", "fat_longitude", "status fat"])
             ? "FAT"
             : null;
+
+    const typeSpecificHeaders = mapping.dataType === 'FDT'
+        ? {
+            id: ["check id fdt", "check id fat"],
+            label: ["fdt code survey", "label fat new", "label fat old", "fat code old"],
+            visitDate: ["update fdt", "update fat"],
+            latitude: ["fdt latitude", "fat latitude", "latitude"],
+            longitude: ["fdt longitude", "fat longitude", "longitude"],
+            status: ["status fdt", "status fat", "status port", "status"]
+        }
+        : {
+            id: ["check id fat", "check id fdt"],
+            label: ["label fat new", "label fat old", "fat code old", "fdt code survey"],
+            visitDate: ["update fat", "update fdt"],
+            latitude: ["fat latitude", "fdt latitude", "latitude"],
+            longitude: ["fat longitude", "fdt longitude", "longitude"],
+            status: ["status fat", "status fdt", "status port", "status"]
+        };
+    for (const [field, preferredNames] of Object.entries(typeSpecificHeaders)) {
+        const preferredHeader = preferredNames
+            .map(name => headers.find(header => normHeader(header) === name || compact(header) === compact(name)))
+            .find(Boolean);
+        if (preferredHeader) mapping[field] = preferredHeader;
+    }
 
     if (!mapping.site && mapping.siteId) mapping.site = mapping.siteId;
     __fatHeaderCache.set(cacheKey, mapping);
@@ -2931,6 +2958,7 @@ Number.isFinite(customer.longitude)
         'total used': ['total used', 'total used (visual)', 'total used visual'],
         'total idle': ['total idle', 'total idle (visual)', 'total idle visual'],
         'status fat': ['status fat', 'status fdt', 'status port', 'status'],
+        'status fdt': ['status fdt', 'status fat', 'status port', 'status'],
         'province': ['province', 'provinsi'],
         'ioh business area': ['ioh business area', 'business area'],
         'cluster name': ['cluster name'],
@@ -2946,6 +2974,7 @@ Number.isFinite(customer.longitude)
         const keys = rawFieldAliases[normalizedHeader] || [normalizedHeader];
         return Object.keys(rawFatData).find(item => keys.includes(normalizeRawHeader(item)));
     };
+    const getRawHeader = header => findRawKey(header) || header;
     const getRawValue = header => {
         const key = findRawKey(header);
         return key ? rawFatData[key] : '';
@@ -2969,10 +2998,12 @@ Number.isFinite(customer.longitude)
         [isFdt ? 'FDT LATITUDE' : 'FAT LATITUDE', getRawValue(isFdt ? 'FDT LATITUDE' : 'FAT LATITUDE') || customer.latitude],
         [isFdt ? 'FDT LONGITUDE' : 'FAT LONGITUDE', getRawValue(isFdt ? 'FDT LONGITUDE' : 'FAT LONGITUDE') || customer.longitude],
         [isFdt ? 'Update FDT' : 'Update FAT', getRawValue(isFdt ? 'Update FDT' : 'Update FAT')],
-        ...(!isFdt ? [
+        ...(isFdt ? [
+            [getRawHeader('Source Data'), getRawValue('Source Data')]
+        ] : [
             ['Update Installation', getRawValue('Update Installation')],
-            ['Sourch Data', getRawValue('Source Data')]
-        ] : [])
+            [getRawHeader('Source Data'), getRawValue('Source Data')]
+        ])
     ];
     const markerRows = markerDetails.map(([label, value]) => `
                 <tr>
@@ -2985,7 +3016,10 @@ Number.isFinite(customer.longitude)
         ['Total Port', getRawValue('Total Port')],
         ['Total Used', getRawValue('Total Used')],
         ['Total Idle', getRawValue('Total Idle')],
-        [isFdt ? 'Status FDT' : 'Status FAT', getRawValue(isFdt ? 'Status FDT' : 'Status FAT') || customer.status]
+        [
+            getRawHeader(isFdt ? 'Status FDT' : 'Status FAT'),
+            getRawValue(isFdt ? 'Status FDT' : 'Status FAT') || customer.status
+        ]
     ];
     const portHeaders = portDetails.map(([label]) =>
         `<th scope="col">${escapeHtml(label)}</th>`
