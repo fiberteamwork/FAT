@@ -2348,7 +2348,21 @@ function focusMapOnCoordinates(latitude, longitude) {
         coordinateSearchOverlay = createMapEmojiOverlay(
             '🧍🏿',
             'user-location-marker',
-            'user-location-marker-anchor'
+            'user-location-marker-anchor',
+            coordinates => {
+                const [longitude, latitude] = ol.proj.toLonLat(coordinates);
+                coordinateSearchCoordinates = [longitude, latitude];
+                const input = document.getElementById('coordinate-search-input');
+                if (input) input.value = `${latitude}, ${longitude}`;
+                const message = document.getElementById('coordinate-search-message');
+                if (message) message.textContent = `Lokasi: ${latitude}, ${longitude} (radius ${COORDINATE_SEARCH_RADIUS_METERS} m)`;
+
+                coordinateSearchLayer.getSource().getFeatures().forEach(feature => {
+                    const geometry = feature.getGeometry();
+                    if (geometry instanceof ol.geom.Circle) geometry.setCenter(coordinates);
+                    else if (geometry instanceof ol.geom.Point) geometry.setCoordinates(coordinates);
+                });
+            }
         );
         map.addOverlay(coordinateSearchOverlay);
     }
@@ -2499,7 +2513,7 @@ function drawCustomers(data, options){
     const opts = activeMapDrawOptions;
     const expandGroups = !!opts.expandGroups;
 
-    const makeFeature = customer => {
+    const makeFeature = (customer, sourceCustomer = customer) => {
         const feat = new ol.Feature({
             geometry: new ol.geom.Point(
                 ol.proj.fromLonLat([
@@ -2507,7 +2521,8 @@ function drawCustomers(data, options){
                     Number(customer.latitude)
                 ])
             ),
-            customer
+            customer,
+            sourceCustomer
         });
         try{ feat.set('drawVersion', customerDrawVersion); }catch(e){}
         try{ if (customer && typeof customer === 'object') customer.__drawVersion = customerDrawVersion; }catch(e){}
@@ -2665,7 +2680,7 @@ function drawCustomers(data, options){
                 c.groupMembers = members;
                 c.groupCount = members.length;
             }
-            const feature = makeFeature(c);
+            const feature = makeFeature(c, customer);
             if (c.resolvedBy && c.resolvedBy !== 'original') adjustedFeatures.push(feature); else originalFeatures.push(feature);
             individualCount++;
         })
@@ -2840,225 +2855,145 @@ function drawCustomers(data, options){
 // ==========================
 // MARKER EDITING
 // ==========================
-let markerEditEnabled = false;
-let markerTranslateInteraction = null;
+let markerDragInteraction = null;
+let markerDragState = null;
+let markerDraggingStyles = [];
+let markerDragAnimationFrame = null;
 
-function setupMarkerEditingControl() { return; // disabled per user request - do not create edit markers UI
-
-    // Robustly add the edit control; retry briefly if DOM element isn't ready yet.
-    if (setupMarkerEditingControl._initialized) return;
-    setupMarkerEditingControl._initialized = true;
-    console.log('setupMarkerEditingControl: start');
-
-    const makeAndInsert = () => {
-        try {
-            const btn = document.createElement('button');
-            btn.id = 'marker-edit-toggle';
-            btn.className = 'marker-edit-toggle';
-            btn.type = 'button';
-            btn.setAttribute('aria-label', 'Toggle marker edit');
-            btn.title = 'Enable marker edit (drag markers)';
-            btn.style.padding = '6px 8px';
-            btn.style.margin = '4px';
-            btn.style.background = '#fff';
-            btn.style.border = '1px solid #ccc';
-            btn.style.cursor = 'pointer';
-            btn.style.fontSize = '13px';
-            btn.textContent = '✏️ Edit markers';
-
-            btn.addEventListener('click', function() {
-                toggleMarkerEditing();
-                btn.textContent = markerEditEnabled ? '⏹ Stop editing' : '✏️ Edit markers';
-                btn.style.background = markerEditEnabled ? '#fee' : '#fff';
-                // sync floating button label if present
-                const fb = document.getElementById('marker-edit-floating'); if (fb) fb.textContent = markerEditEnabled ? 'Stop editing' : 'Edit markers';
-            });
-
-            const wrapper = document.createElement('div');
-            wrapper.className = 'ol-control ol-unselectable marker-edit-control';
-            wrapper.style.display = 'inline-block';
-            wrapper.style.padding = '2px';
-            wrapper.style.background = 'transparent';
-            wrapper.appendChild(btn);
-
-            const parent = document.getElementById('top-left-container');
-            if (parent && parent.appendChild) {
-                parent.appendChild(wrapper);
-                console.log('setupMarkerEditingControl: appended to #top-left-container');
-                return true;
-            }
-
-            if (typeof map !== 'undefined' && map && typeof ol !== 'undefined' && ol.control) {
-                try {
-                    map.addControl(new ol.control.Control({ element: wrapper }));
-                    console.log('setupMarkerEditingControl: added control via map.addControl');
-                    return true;
-                } catch (e) {
-                    console.warn('setupMarkerEditingControl: map.addControl failed', e);
-                }
-            }
-
-            // fallback to body
-            document.body.appendChild(wrapper);
-            console.log('setupMarkerEditingControl: appended to document.body (fallback)');
-            return true;
-        } catch (e) {
-            console.warn('setupMarkerEditingControl makeAndInsert error', e);
-            return false;
-        }
-    };
-
-    // Always create a floating visible button as a guaranteed fallback (high z-index)
-    const makeFloatingButton = () => {
-        try {
-            if (document.getElementById('marker-edit-floating')) return;
-            const fb = document.createElement('button');
-            fb.id = 'marker-edit-floating';
-            fb.type = 'button';
-            fb.title = 'Edit markers';
-            fb.style.position = 'fixed';
-            fb.style.right = '16px';
-            fb.style.bottom = '16px';
-            fb.style.zIndex = '2147483647';
-            fb.style.background = '#007bff';
-            fb.style.color = '#fff';
-            fb.style.border = 'none';
-            fb.style.padding = '10px 14px';
-            fb.style.borderRadius = '6px';
-            fb.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
-            fb.style.cursor = 'pointer';
-            fb.style.fontSize = '14px';
-            fb.textContent = '✏️ Edit markers';
-            fb.addEventListener('click', function() {
-                toggleMarkerEditing();
-                fb.textContent = markerEditEnabled ? '⏹ Stop editing' : '✏️ Edit markers';
-                const domBtn = document.getElementById('marker-edit-toggle'); if (domBtn) domBtn.textContent = markerEditEnabled ? '⏹ Stop editing' : '✏️ Edit markers';
-            });
-            document.body.appendChild(fb);
-            console.log('setupMarkerEditingControl: floating button added');
-        } catch (e) { console.warn('setupMarkerEditingControl makeFloatingButton error', e); }
-    };
-
-    // Try immediate insert, otherwise retry for up to 2 seconds
-    if (makeAndInsert()) { makeFloatingButton(); return; }
-    const start = Date.now();
-    const interval = setInterval(() => {
-        if (makeAndInsert()) {
-            makeFloatingButton();
-            clearInterval(interval);
-            return;
-        }
-        if (Date.now() - start > 2000) {
-            // always ensure floating button appears as last resort
-            makeFloatingButton();
-            clearInterval(interval);
-            console.warn('setupMarkerEditingControl: giving up after retries, floating button added');
-        }
-    }, 100);
-}
-
-function toggleMarkerEditing(enable) {
+function setupMarkerTranslation() {
     try {
-        if (typeof enable === 'boolean') {
-            if (enable === markerEditEnabled) return;
-            markerEditEnabled = enable;
-        } else {
-            markerEditEnabled = !markerEditEnabled;
-        }
-
-        if (!map) {
-            console.warn('toggleMarkerEditing: map undefined');
-            return;
-        }
-
-        // remove existing interaction
-        if (markerTranslateInteraction) {
-            try { map.removeInteraction(markerTranslateInteraction); } catch (e) {}
-            markerTranslateInteraction = null;
-        }
-
-        if (!markerEditEnabled) {
-            return;
-        }
+        if (markerDragInteraction || !map) return;
 
         if (typeof customerLayer === 'undefined' || !customerLayer) {
-            console.warn('toggleMarkerEditing: customerLayer not available');
-            markerEditEnabled = false;
+            console.warn('setupMarkerTranslation: customerLayer not available');
             return;
         }
 
-        // Create Translate interaction restricted to customerLayer
-        markerTranslateInteraction = new ol.interaction.Translate({
-            layers: function(layer) {
-                try { return layer === customerLayer || (layer && layer.get && layer.get('customerLayer') === true); } catch (e) { return false; }
+        const isCustomerMarkerLayer = layer => layer === customerLayer || layer === customerExpandedLayer;
+        const getCustomerMarkerAtPixel = pixel => map.forEachFeatureAtPixel(
+            pixel,
+            feature => feature.get('customer') ? feature : undefined,
+            { layerFilter: isCustomerMarkerLayer, hitTolerance: 8 }
+        );
+        const mapElement = map.getTargetElement && map.getTargetElement();
+
+        markerDragInteraction = new ol.interaction.Pointer({
+            handleDownEvent: event => {
+                if (coordinateRulerActive) return false;
+                const originalEvent = event.originalEvent;
+                if (originalEvent && originalEvent.button !== undefined && originalEvent.button !== 0) return false;
+
+                const feature = getCustomerMarkerAtPixel(event.pixel);
+                if (!feature) return false;
+
+                markerDragState = {
+                    feature,
+                    lastCoordinate: event.coordinate.slice(),
+                    moved: false
+                };
+                if (mapElement) mapElement.style.cursor = 'grabbing';
+                return true;
             },
-            // small hit tolerance to make dragging easier on touch
-            hitTolerance: 6
-        });
+            handleDragEvent: event => {
+                const state = markerDragState;
+                if (!state) return;
+                const geometry = state.feature.getGeometry();
+                if (!geometry || typeof geometry.translate !== 'function') return;
 
-        markerTranslateInteraction.on('translateend', function(evt) {
-            try {
-                // evt.features is a Collection in some ol versions, or evt.feature
-                const features = (evt.features && typeof evt.features.getArray === 'function') ? evt.features.getArray() : (evt.feature ? [evt.feature] : []);
-                for (const f of features) {
-                    if (!f) continue;
-                    const geom = f.getGeometry && f.getGeometry();
-                    if (!geom) continue;
-                    const coords = geom.getCoordinates();
-                    const lonlat = ol.proj.toLonLat(coords);
-                    const lon = Number(lonlat[0]);
-                    const lat = Number(lonlat[1]);
+                const deltaX = event.coordinate[0] - state.lastCoordinate[0];
+                const deltaY = event.coordinate[1] - state.lastCoordinate[1];
+                if (deltaX === 0 && deltaY === 0) return;
 
-                    // Update attached customer object if present
-                    try {
-                        const c = f.get('customer');
-                        if (c && typeof c === 'object') {
-                            c.latitude = lat;
-                            c.longitude = lon;
-                            // mark as edited
-                            c.__edited = true;
-                            // sync back to feature property
-                            f.set('customer', c);
-                        }
-                    } catch (e) { }
+                geometry.translate(deltaX, deltaY);
+                state.lastCoordinate = event.coordinate.slice();
+                state.moved = true;
+                animateMarkerWhileDragging(state.feature);
+            },
+            handleMoveEvent: event => {
+                if (markerDragState) return;
+                if (mapElement) {
+                    mapElement.style.cursor = getCustomerMarkerAtPixel(event.pixel) ? 'grab' : '';
+                }
+            },
+            handleUpEvent: () => {
+                const state = markerDragState;
+                if (!state) return false;
 
-                    // Also, update any internal customers array entry if possible (match by id)
-                    try {
-                        const cust = f.get('customer');
-                        if (cust && cust.id && Array.isArray(customers)) {
-                            const idx = customers.findIndex(x => String(x.id) === String(cust.id));
-                            if (idx >= 0) {
-                                customers[idx].latitude = lat;
-                                customers[idx].longitude = lon;
-                                customers[idx].__edited = true;
-                            }
-                        }
-                    } catch (e) { }
+                markerDragState = null;
+                stopMarkerDragAnimation();
+                if (mapElement) mapElement.style.cursor = '';
+
+                const customer = state.feature.get('customer');
+                if (!state.moved) {
+                    if (customer) showCustomerPopup(customer, state.feature);
+                    return false;
                 }
 
-                // Optionally show a small confirmation in popup
-                try {
-                    const popup = document.getElementById('popup-content');
-                    if (popup) {
-                        popup.innerHTML = '<div class="customer-popup"><p>Marker posisi diperbarui. Jangan lupa menyimpan perubahan.</p></div>';
-                        if (typeof container !== 'undefined') container.style.display = 'block';
-                        if (typeof overlayPopup !== 'undefined') {
-                            // place near first moved feature
-                            const first = features && features[0];
-                            if (first) {
-                                const p = ol.proj.toLonLat(first.getGeometry().getCoordinates());
-                                overlayPopup.setPosition(ol.proj.fromLonLat([p[0], p[1]]));
-                            }
-                        }
-                    }
-                } catch (e) { }
+                const coordinates = state.feature.getGeometry().getCoordinates();
+                const [longitude, latitude] = ol.proj.toLonLat(coordinates);
+                if (customer && typeof customer === 'object') {
+                    customer.latitude = latitude;
+                    customer.longitude = longitude;
+                    customer.__edited = true;
+                }
+                const sourceCustomer = state.feature.get('sourceCustomer');
+                if (sourceCustomer && typeof sourceCustomer === 'object') {
+                    sourceCustomer.latitude = latitude;
+                    sourceCustomer.longitude = longitude;
+                    sourceCustomer.__edited = true;
+                }
+                state.feature.changed();
 
-            } catch (e) { console.warn('marker translateend handler failed', e); }
+                const popup = document.getElementById('popup-content');
+                if (popup) {
+                    popup.innerHTML = '<div class="customer-popup"><p>Marker posisi diperbarui. Jangan lupa menyimpan perubahan.</p></div>';
+                    if (typeof container !== 'undefined') container.style.display = 'block';
+                    if (typeof overlayPopup !== 'undefined') overlayPopup.setPosition(coordinates);
+                }
+                return false;
+            }
         });
 
-        map.addInteraction(markerTranslateInteraction);
+        map.addInteraction(markerDragInteraction);
 
-    } catch (e) { console.warn('toggleMarkerEditing failed', e); }
+    } catch (e) {
+        markerDragInteraction = null;
+        console.warn('setupMarkerTranslation failed', e);
+    }
+}
+
+function animateMarkerWhileDragging(feature) {
+    if (!markerDraggingStyles.length && feature && typeof feature.setStyle === 'function') {
+        const styleFunction = customerLayer && customerLayer.getStyle && customerLayer.getStyle();
+        const baseStyle = typeof styleFunction === 'function' ? styleFunction(feature) : null;
+        const ringImage = new ol.style.Circle({
+            radius: 10,
+            fill: new ol.style.Fill({ color: 'rgba(59, 130, 246, 0.18)' }),
+            stroke: new ol.style.Stroke({ color: 'rgba(37, 99, 235, 0.9)', width: 2 })
+        });
+        const ringStyle = new ol.style.Style({ image: ringImage });
+        feature.setStyle(baseStyle ? [ringStyle, ...(Array.isArray(baseStyle) ? baseStyle : [baseStyle])] : ringStyle);
+        markerDraggingStyles.push({ feature, ringImage });
+
+        const animate = timestamp => {
+            if (!markerDraggingStyles.length) return;
+            ringImage.setRadius(10 + (1 + Math.sin(timestamp / 140)) * 2.5);
+            if (map && typeof map.render === 'function') map.render();
+            markerDragAnimationFrame = requestAnimationFrame(animate);
+        };
+        markerDragAnimationFrame = requestAnimationFrame(animate);
+    }
+}
+
+function stopMarkerDragAnimation() {
+    if (markerDragAnimationFrame !== null) {
+        cancelAnimationFrame(markerDragAnimationFrame);
+        markerDragAnimationFrame = null;
+    }
+    markerDraggingStyles.forEach(({ feature }) => {
+        if (feature && typeof feature.setStyle === 'function') feature.setStyle(null);
+    });
+    markerDraggingStyles = [];
 }
 
 function showCustomerPopup(customer, feature) {
@@ -3247,24 +3182,68 @@ function createUserLocationOverlay() {
     userLocationOverlay = createMapEmojiOverlay(
         '🧍🏿',
         'user-location-marker',
-        'user-location-marker-anchor'
+        'user-location-marker-anchor',
+        coordinates => {
+            if (userLocationFeature) userLocationFeature.getGeometry().setCoordinates(coordinates);
+            if (userLocationAccuracyFeature) {
+                const geometry = userLocationAccuracyFeature.getGeometry();
+                if (geometry instanceof ol.geom.Circle) geometry.setCenter(coordinates);
+            }
+        }
     );
     map.addOverlay(userLocationOverlay);
 }
 
-function createMapEmojiOverlay(emoji, markerClass, anchorClass) {
+function createMapEmojiOverlay(emoji, markerClass, anchorClass, onPositionChange) {
     const marker = document.createElement('div');
     marker.className = anchorClass;
     marker.setAttribute('aria-hidden', 'true');
     const icon = document.createElement('span');
     icon.className = markerClass;
     icon.textContent = emoji;
+    icon.style.pointerEvents = 'auto';
+    icon.style.cursor = 'grab';
+    icon.style.touchAction = 'none';
     marker.appendChild(icon);
-    return new ol.Overlay({
+    const overlay = new ol.Overlay({
         element: marker,
         positioning: 'bottom-center',
         stopEvent: false
     });
+
+    let activePointerId = null;
+    icon.addEventListener('pointerdown', event => {
+        if (event.button !== undefined && event.button !== 0) return;
+        activePointerId = event.pointerId;
+        icon.style.cursor = 'grabbing';
+        event.preventDefault();
+        event.stopPropagation();
+        if (icon.setPointerCapture) icon.setPointerCapture(event.pointerId);
+    });
+
+    icon.addEventListener('pointermove', event => {
+        if (event.pointerId !== activePointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const coordinates = map.getEventCoordinate(event);
+        overlay.setPosition(coordinates);
+        if (typeof onPositionChange === 'function') onPositionChange(coordinates);
+    });
+
+    const finishOverlayDrag = event => {
+        if (event.pointerId !== activePointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        activePointerId = null;
+        icon.style.cursor = 'grab';
+        if (icon.hasPointerCapture && icon.hasPointerCapture(event.pointerId)) {
+            icon.releasePointerCapture(event.pointerId);
+        }
+    };
+    icon.addEventListener('pointerup', finishOverlayDrag);
+    icon.addEventListener('pointercancel', finishOverlayDrag);
+
+    return overlay;
 }
 
 function showUserLocation(latitude, longitude, accuracyMeters) {
@@ -5415,10 +5394,11 @@ async function loadData(input = null) {
         setupDataView();
         setupMapClick();
         createCustomerLayer();
+        setupMarkerTranslation();
         drawCustomers(customers, { expandGroups: true });
-    updateSummary(customers);
-    updateChart(customers);
-    updateODCChart(customers);
+        updateSummary(customers);
+        updateChart(customers);
+        updateODCChart(customers);
         window.customerMapReady = true;
         if (loadingStatus) loadingStatus.hidden = true;
 
