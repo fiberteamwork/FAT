@@ -2875,6 +2875,11 @@ function setupMarkerTranslation() {
             feature => feature.get('customer') ? feature : undefined,
             { layerFilter: isCustomerMarkerLayer, hitTolerance: 8 }
         );
+        const isDraggableCustomerMarker = feature => {
+            const customer = feature && feature.get('customer');
+            const dataType = String(customer && customer.dataType || 'FAT').trim().toUpperCase();
+            return dataType !== 'FAT' && dataType !== 'FDT';
+        };
         const mapElement = map.getTargetElement && map.getTargetElement();
 
         markerDragInteraction = new ol.interaction.Pointer({
@@ -2884,7 +2889,7 @@ function setupMarkerTranslation() {
                 if (originalEvent && originalEvent.button !== undefined && originalEvent.button !== 0) return false;
 
                 const feature = getCustomerMarkerAtPixel(event.pixel);
-                if (!feature) return false;
+                if (!isDraggableCustomerMarker(feature)) return false;
 
                 markerDragState = {
                     feature,
@@ -2912,7 +2917,8 @@ function setupMarkerTranslation() {
             handleMoveEvent: event => {
                 if (markerDragState) return;
                 if (mapElement) {
-                    mapElement.style.cursor = getCustomerMarkerAtPixel(event.pixel) ? 'grab' : '';
+                    const feature = getCustomerMarkerAtPixel(event.pixel);
+                    mapElement.style.cursor = isDraggableCustomerMarker(feature) ? 'grab' : '';
                 }
             },
             handleUpEvent: () => {
