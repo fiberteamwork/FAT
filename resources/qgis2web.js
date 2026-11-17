@@ -352,8 +352,13 @@ function updatePopup() {
     }
 } 
 
+function isCoordinateRulerActive() {
+    var rulerButton = document.getElementById('coordinate-ruler-button');
+    return !!rulerButton && rulerButton.getAttribute('aria-pressed') === 'true';
+}
+
 function onSingleClickFeatures(evt) {
-    if (doHover || sketch) {
+    if (doHover || sketch || isCoordinateRulerActive()) {
         return;
     }
     if (!featuresPopupActive) {
@@ -410,7 +415,7 @@ function onSingleClickFeatures(evt) {
 }
 
 function onSingleClickWMS(evt) {
-    if (doHover || sketch) {
+    if (doHover || sketch || isCoordinateRulerActive()) {
         return;
     }
     if (!featuresPopupActive) {
@@ -572,7 +577,7 @@ document.addEventListener('DOMContentLoaded', function() {
     //zoom
     var zoomControl = document.getElementsByClassName('ol-zoom')[0];
     if (zoomControl) {
-        topLeftContainerDiv.appendChild(zoomControl);
+        topRightContainerDiv.appendChild(zoomControl);
     }
     //geolocate
     if (typeof geolocateControl !== 'undefined') {
