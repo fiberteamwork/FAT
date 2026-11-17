@@ -37,7 +37,9 @@ let initialMapFocusApplied = false;
 let userLocationLayer = null;
 let userLocationFeature = null;
 let userLocationAccuracyFeature = null;
+let userLocationOverlay = null;
 let coordinateSearchLayer = null;
+let coordinateSearchOverlay = null;
 let coordinateRulerLayer = null;
 let coordinateSearchCoordinates = null;
 let coordinateRulerActive = false;
@@ -45,7 +47,7 @@ let coordinateRulerPoints = [];
 let coordinateRulerDistanceMeters = 0;
 let coordinateRulerLineFeature = null;
 let coordinateRulerLabelFeature = null;
-const COORDINATE_SEARCH_RADIUS_METERS = 200;
+const COORDINATE_SEARCH_RADIUS_METERS = 150;
 const EARTH_MEAN_RADIUS_METERS = 6371008.8;
 const WEB_MERCATOR_MAX_LATITUDE = 85.0511287798;
 
@@ -2329,14 +2331,7 @@ function focusMapOnCoordinates(latitude, longitude) {
                     fill: new ol.style.Fill({ color: 'rgba(33,150,243,0.16)' }),
                     stroke: new ol.style.Stroke({ color: '#2196f3', width: 2 })
                 })
-                : new ol.style.Style({
-                    text: new ol.style.Text({
-                        text: '📍',
-                        font: '24px sans-serif',
-                        fill: new ol.style.Fill({ color: '#d32f2f' }),
-                        stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 })
-                    })
-                })
+                : null
         });
         map.addLayer(coordinateSearchLayer);
     }
@@ -2349,6 +2344,15 @@ function focusMapOnCoordinates(latitude, longitude) {
     coordinateSearchLayer.getSource().addFeature(new ol.Feature({
         geometry: new ol.geom.Point(coordinates)
     }));
+    if (!coordinateSearchOverlay) {
+        coordinateSearchOverlay = createMapEmojiOverlay(
+            '🧍🏿',
+            'user-location-marker',
+            'user-location-marker-anchor'
+        );
+        map.addOverlay(coordinateSearchOverlay);
+    }
+    coordinateSearchOverlay.setPosition(coordinates);
     map.getView().animate({ center: coordinates, zoom: 16, duration: 500 });
 }
 
@@ -3078,7 +3082,7 @@ Number.isFinite(customer.longitude)
                 target="_blank"
                 href="https://www.google.com/maps/dir/?api=1&destination=${customer.latitude},${customer.longitude}"
             >
-                📍 Buka GPS / Google Maps
+                🧍🏿 Buka GPS / Google Maps
             </a>
             `;
 
@@ -3230,21 +3234,37 @@ function createUserLocationLayer() {
                             stroke: new ol.style.Stroke({ color: 'rgba(33,150,243,0.35)', width: 1 })
                         });
                     }
-                    // default: position icon (emoji)
-                    return new ol.style.Style({
-                        text: new ol.style.Text({
-                            text: '📍',
-                            font: '24px sans-serif',
-                            fill: new ol.style.Fill({ color: '#d32f2f' }),
-                            stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
-                            offsetY: 0
-                        })
-                    });
+                    return null;
                 } catch (e) { return null; }
             }
         });
         try { map.addLayer(userLocationLayer); } catch (e) { console.warn('createUserLocationLayer addLayer failed', e); }
     } catch (e) { console.warn('createUserLocationLayer failed', e); }
+}
+
+function createUserLocationOverlay() {
+    if (userLocationOverlay) return;
+    userLocationOverlay = createMapEmojiOverlay(
+        '🧍🏿',
+        'user-location-marker',
+        'user-location-marker-anchor'
+    );
+    map.addOverlay(userLocationOverlay);
+}
+
+function createMapEmojiOverlay(emoji, markerClass, anchorClass) {
+    const marker = document.createElement('div');
+    marker.className = anchorClass;
+    marker.setAttribute('aria-hidden', 'true');
+    const icon = document.createElement('span');
+    icon.className = markerClass;
+    icon.textContent = emoji;
+    marker.appendChild(icon);
+    return new ol.Overlay({
+        element: marker,
+        positioning: 'bottom-center',
+        stopEvent: false
+    });
 }
 
 function showUserLocation(latitude, longitude, accuracyMeters) {
@@ -3268,6 +3288,8 @@ function showUserLocation(latitude, longitude, accuracyMeters) {
         }
         try { if (userLocationAccuracyFeature) src.addFeature(userLocationAccuracyFeature); } catch (e) {}
         try { if (userLocationFeature) src.addFeature(userLocationFeature); } catch (e) {}
+        createUserLocationOverlay();
+        userLocationOverlay.setPosition(coords);
         try {
             const view = map.getView();
             if (view) {
@@ -3279,9 +3301,11 @@ function showUserLocation(latitude, longitude, accuracyMeters) {
 
 function clearUserLocation() {
     try {
-        if (!userLocationLayer) return;
-        const src = userLocationLayer.getSource();
-        if (src && typeof src.clear === 'function') src.clear();
+        if (userLocationLayer) {
+            const src = userLocationLayer.getSource();
+            if (src && typeof src.clear === 'function') src.clear();
+        }
+        if (userLocationOverlay) userLocationOverlay.setPosition(undefined);
         userLocationFeature = null; userLocationAccuracyFeature = null;
     } catch (e) { console.warn('clearUserLocation failed', e); }
 }
@@ -3292,14 +3316,22 @@ function setupGeolocateControl() {
         setupGeolocateControl._initialized = true;
         if (document.getElementById('geolocate-btn')) return;
 
+        function setButtonContent(icon, label) {
+            const iconElement = document.createElement('span');
+            iconElement.className = 'geolocate-button-icon';
+            iconElement.textContent = icon;
+            const labelElement = document.createElement('span');
+            labelElement.textContent = label;
+            btn.replaceChildren(iconElement, labelElement);
+        }
+
         const btn = document.createElement('button');
         btn.id = 'geolocate-btn';
         btn.type = 'button';
-        btn.textContent = '📍 Lokasi Anda';
         btn.style.background = '#007bff';
         btn.style.color = '#fff';
         btn.style.border = 'none';
-        btn.style.padding = '10px 14px';
+        btn.style.padding = '6px 12px';
         btn.style.borderRadius = '6px';
         btn.style.cursor = 'pointer';
         btn.style.fontSize = '13px';
@@ -3307,10 +3339,15 @@ function setupGeolocateControl() {
         btn.style.height = 'auto';
         btn.style.width = 'auto';
         btn.style.lineHeight = 'normal';
+        btn.style.display = 'flex';
+        btn.style.alignItems = 'center';
+        btn.style.gap = '6px';
+        setButtonContent('📡', 'Lokasi Anda');
         btn.addEventListener('click', function() {
             try {
                 if (!('geolocation' in navigator)) { alert('Perangkat tidak mendukung Geolocation'); return; }
-                btn.disabled = true; btn.textContent = '📡 Mencari...';
+                btn.disabled = true;
+                setButtonContent('📡', 'Mencari...');
                 navigator.geolocation.getCurrentPosition(function(pos) {
                     try {
                         const lat = pos.coords.latitude;
@@ -3318,13 +3355,19 @@ function setupGeolocateControl() {
                         const acc = pos.coords.accuracy || 0;
                         showUserLocation(lat, lon, acc);
                     } catch (e) { console.warn('geolocation success handler failed', e); }
-                    btn.disabled = false; btn.textContent = '📍 Lokasi Anda';
+                    btn.disabled = false;
+                    setButtonContent('📡', 'Lokasi Anda');
                 }, function(err) {
                     console.warn('geolocation error', err);
                     alert('Gagal mendapatkan lokasi: ' + (err && err.message ? err.message : 'Unknown'));
-                    btn.disabled = false; btn.textContent = '📍 Lokasi Anda';
+                    btn.disabled = false;
+                    setButtonContent('📡', 'Lokasi Anda');
                 }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
-            } catch (e) { console.warn('geolocate click handler failed', e); btn.disabled = false; btn.textContent = '📍 Lokasi Anda'; }
+            } catch (e) {
+                console.warn('geolocate click handler failed', e);
+                btn.disabled = false;
+                setButtonContent('📡', 'Lokasi Anda');
+            }
         });
 
         // Create an OL control element so it sits inside the map's control area (bottom-right)
@@ -5044,7 +5087,7 @@ function setupDataView() {
                        const txt = (el.textContent || '').trim();
                        const id = (el.id || '').toString().toLowerCase();
                        const cls = (el.className || '').toString().toLowerCase();
-                       const looksLikeGeo = txt.includes('📍') || id.includes('geolocate') || id.includes('geolocate-btn') || id.includes('marker-edit') || id.includes('save-edits') || cls.includes('marker-edit') || cls.includes('geolocate');
+                       const looksLikeGeo = txt.includes('🧍🏿') || id.includes('geolocate') || id.includes('geolocate-btn') || id.includes('marker-edit') || id.includes('save-edits') || cls.includes('marker-edit') || cls.includes('geolocate');
                        if (!looksLikeGeo) {
                            // also allow hiding by spatial location (small fixed near bottom-right)
                            const cs = window.getComputedStyle(el);
