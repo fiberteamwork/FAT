@@ -37,6 +37,17 @@ let initialMapFocusApplied = false;
 let userLocationLayer = null;
 let userLocationFeature = null;
 let userLocationAccuracyFeature = null;
+let coordinateSearchLayer = null;
+let coordinateRulerLayer = null;
+let coordinateSearchCoordinates = null;
+let coordinateRulerActive = false;
+let coordinateRulerPoints = [];
+let coordinateRulerDistanceMeters = 0;
+let coordinateRulerLineFeature = null;
+let coordinateRulerLabelFeature = null;
+const COORDINATE_SEARCH_RADIUS_METERS = 200;
+const EARTH_MEAN_RADIUS_METERS = 6371008.8;
+const WEB_MERCATOR_MAX_LATITUDE = 85.0511287798;
 
 
 // Remove stale customer layers or layers that accidentally contain customer features
@@ -2305,6 +2316,139 @@ function focusMapOnCustomers(data) {
     }
 }
 
+function focusMapOnCoordinates(latitude, longitude) {
+    const coordinates = ol.proj.fromLonLat([longitude, latitude]);
+    const projectionLatitude = Math.max(-WEB_MERCATOR_MAX_LATITUDE, Math.min(WEB_MERCATOR_MAX_LATITUDE, latitude));
+    const radiusInMapUnits = COORDINATE_SEARCH_RADIUS_METERS / Math.cos(projectionLatitude * Math.PI / 180);
+    if (!coordinateSearchLayer) {
+        coordinateSearchLayer = new ol.layer.Vector({
+            source: new ol.source.Vector(),
+            zIndex: 2147483645,
+            style: feature => feature.get('type') === 'radius'
+                ? new ol.style.Style({
+                    fill: new ol.style.Fill({ color: 'rgba(33,150,243,0.16)' }),
+                    stroke: new ol.style.Stroke({ color: '#2196f3', width: 2 })
+                })
+                : new ol.style.Style({
+                    text: new ol.style.Text({
+                        text: '📍',
+                        font: '24px sans-serif',
+                        fill: new ol.style.Fill({ color: '#d32f2f' }),
+                        stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 })
+                    })
+                })
+        });
+        map.addLayer(coordinateSearchLayer);
+    }
+
+    coordinateSearchLayer.getSource().clear();
+    coordinateSearchLayer.getSource().addFeature(new ol.Feature({
+        type: 'radius',
+        geometry: new ol.geom.Circle(coordinates, radiusInMapUnits)
+    }));
+    coordinateSearchLayer.getSource().addFeature(new ol.Feature({
+        geometry: new ol.geom.Point(coordinates)
+    }));
+    map.getView().animate({ center: coordinates, zoom: 16, duration: 500 });
+}
+
+function getGreatCircleDistanceMeters(start, end) {
+    const toRadians = degrees => degrees * Math.PI / 180;
+    const [startLongitude, startLatitude] = start.map(toRadians);
+    const [endLongitude, endLatitude] = end.map(toRadians);
+    const latitudeDelta = endLatitude - startLatitude;
+    const longitudeDelta = endLongitude - startLongitude;
+    const haversine = Math.min(1,
+        Math.sin(latitudeDelta / 2) ** 2 +
+        Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(longitudeDelta / 2) ** 2
+    );
+    return 2 * EARTH_MEAN_RADIUS_METERS * Math.atan2(
+        Math.sqrt(haversine),
+        Math.sqrt(Math.max(0, 1 - haversine))
+    );
+}
+
+function createCoordinateRulerLayer() {
+    if (coordinateRulerLayer) return;
+    coordinateRulerLayer = new ol.layer.Vector({
+        source: new ol.source.Vector(),
+        zIndex: 2147483647,
+        style: feature => {
+            if (feature.get('type') === 'label') {
+                return new ol.style.Style({
+                    text: new ol.style.Text({
+                        text: feature.get('label'),
+                        font: 'bold 14px sans-serif',
+                        offsetY: -16,
+                        fill: new ol.style.Fill({ color: '#111827' }),
+                        stroke: new ol.style.Stroke({ color: '#ffffff', width: 4 })
+                    })
+                });
+            }
+            if (feature.get('type') === 'vertex') {
+                return new ol.style.Style({
+                    image: new ol.style.Circle({
+                        radius: 5,
+                        fill: new ol.style.Fill({ color: '#f97316' }),
+                        stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 })
+                    })
+                });
+            }
+            return new ol.style.Style({
+                stroke: new ol.style.Stroke({ color: '#f97316', width: 3 })
+            });
+        }
+    });
+    map.addLayer(coordinateRulerLayer);
+}
+
+function formatCoordinateRulerDistance(distanceMeters) {
+    return distanceMeters >= 1000
+        ? `${(distanceMeters / 1000).toFixed(2)} km`
+        : `${Math.round(distanceMeters)} m`;
+}
+
+function updateCoordinateRulerDisplay(previewCoordinate) {
+    if (!coordinateRulerPoints.length) return;
+
+    const lineCoordinates = coordinateRulerPoints.map(coordinate => coordinate.slice());
+    let distanceMeters = coordinateRulerDistanceMeters;
+    if (previewCoordinate) {
+        const lastPoint = lineCoordinates[lineCoordinates.length - 1];
+        if (previewCoordinate[0] !== lastPoint[0] || previewCoordinate[1] !== lastPoint[1]) {
+            distanceMeters += getGreatCircleDistanceMeters(
+                ol.proj.toLonLat(lastPoint),
+                ol.proj.toLonLat(previewCoordinate)
+            );
+            lineCoordinates.push(previewCoordinate.slice());
+        }
+    }
+
+    if (lineCoordinates.length < 2) return;
+    createCoordinateRulerLayer();
+    const endCoordinate = lineCoordinates[lineCoordinates.length - 1];
+    if (!coordinateRulerLineFeature) {
+        coordinateRulerLineFeature = new ol.Feature({
+            type: 'line',
+            geometry: new ol.geom.LineString(lineCoordinates)
+        });
+        coordinateRulerLabelFeature = new ol.Feature({
+            type: 'label',
+            label: '',
+            geometry: new ol.geom.Point(endCoordinate)
+        });
+        coordinateRulerLayer.getSource().addFeatures([
+            coordinateRulerLineFeature,
+            coordinateRulerLabelFeature
+        ]);
+    } else {
+        coordinateRulerLineFeature.getGeometry().setCoordinates(lineCoordinates);
+        coordinateRulerLabelFeature.getGeometry().setCoordinates(endCoordinate);
+    }
+
+    coordinateRulerLabelFeature.set('label', formatCoordinateRulerDistance(distanceMeters));
+}
+
 function scheduleViewportCustomerRender() {
     if (!activeMapCustomers.length || mapViewportRenderTimer !== null) return;
     mapViewportRenderTimer = setTimeout(() => {
@@ -3325,6 +3469,7 @@ function setupSaveEditsCSVControl() { return; // disabled: CSV is saved automati
 function setupMapClick() {
 
     map.on('singleclick', function(event) {
+        if (coordinateRulerActive) return;
 
         // Collect all features at the clicked pixel so we can prefer customer markers over polygons
         const hits = [];
@@ -3949,9 +4094,104 @@ if (setupFilters._isInitialized) return;
 setupFilters._isInitialized = true;
  
 const search = document.getElementById("search-label");
+const coordinateSearchForm = document.getElementById("coordinate-search-form");
+const coordinateSearchInput = document.getElementById("coordinate-search-input");
+const coordinateSearchMessage = document.getElementById("coordinate-search-message");
+const coordinateRulerButton = document.getElementById("coordinate-ruler-button");
 const siteDropdownToggle = document.getElementById("filter-site-toggle");
 const siteDropdownPanel = document.getElementById("filter-site-panel");
 const siteDropdownSearch = document.getElementById("filter-site-search");
+
+if (coordinateRulerButton) {
+    coordinateRulerButton.addEventListener("click", () => {
+        if (!coordinateSearchCoordinates) return;
+        coordinateRulerActive = !coordinateRulerActive;
+        coordinateRulerButton.setAttribute("aria-pressed", String(coordinateRulerActive));
+        coordinateRulerButton.textContent = coordinateRulerActive
+            ? "Selesai mengukur"
+            : "Ukur jarak dari pin";
+        if (coordinateRulerActive) {
+            if (coordinateRulerLayer) coordinateRulerLayer.getSource().clear();
+            coordinateRulerPoints = [ol.proj.fromLonLat(coordinateSearchCoordinates)];
+            coordinateRulerDistanceMeters = 0;
+            coordinateRulerLineFeature = null;
+            coordinateRulerLabelFeature = null;
+            const popup = document.getElementById("popup");
+            if (popup) popup.style.display = "none";
+            coordinateSearchMessage.textContent =
+                "Klik beberapa titik pada peta untuk membuat belokan. Klik Selesai mengukur jika sudah selesai.";
+            coordinateSearchMessage.style.color = "#1e293b";
+        } else {
+            if (coordinateRulerPoints.length > 1) {
+                updateCoordinateRulerDisplay();
+                coordinateSearchMessage.textContent =
+                    `Total jarak: ${formatCoordinateRulerDistance(coordinateRulerDistanceMeters)}`;
+            } else {
+                if (coordinateRulerLayer) coordinateRulerLayer.getSource().clear();
+                coordinateRulerLineFeature = null;
+                coordinateRulerLabelFeature = null;
+                coordinateSearchMessage.textContent = "Pengukuran selesai tanpa titik tujuan.";
+            }
+            coordinateSearchMessage.style.color = coordinateRulerPoints.length > 1 ? "#166534" : "#64748b";
+        }
+    });
+
+    map.on("singleclick", event => {
+        if (!coordinateRulerActive || !coordinateSearchCoordinates) return;
+
+        const destination = event.coordinate.slice();
+        const lastPoint = coordinateRulerPoints[coordinateRulerPoints.length - 1];
+        coordinateRulerDistanceMeters += getGreatCircleDistanceMeters(
+            ol.proj.toLonLat(lastPoint),
+            ol.proj.toLonLat(destination)
+        );
+        coordinateRulerPoints.push(destination);
+        updateCoordinateRulerDisplay();
+        coordinateRulerLayer.getSource().addFeature(new ol.Feature({
+            type: "vertex",
+            geometry: new ol.geom.Point(destination)
+        }));
+        coordinateSearchMessage.textContent =
+            `Total jarak: ${formatCoordinateRulerDistance(coordinateRulerDistanceMeters)}. Klik titik lain atau Selesai mengukur.`;
+        coordinateSearchMessage.style.color = "#166534";
+    });
+
+    map.on("pointermove", event => {
+        if (!coordinateRulerActive || event.dragging) return;
+        updateCoordinateRulerDisplay(event.coordinate);
+    });
+}
+
+if (coordinateSearchForm && coordinateSearchInput && coordinateSearchMessage) {
+    coordinateSearchForm.addEventListener("submit", event => {
+        event.preventDefault();
+        const values = coordinateSearchInput.value.trim().split(/[,\s]+/).filter(Boolean);
+        const latitude = Number(values[0]);
+        const longitude = Number(values[1]);
+        if (values.length !== 2 || !Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+            latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+            coordinateSearchMessage.textContent = "Koordinat tidak valid. Masukkan latitude, longitude (contoh: -7.2575, 112.7521).";
+            coordinateSearchMessage.style.color = "#b91c1c";
+            return;
+        }
+
+        coordinateSearchCoordinates = [longitude, latitude];
+        coordinateRulerActive = false;
+        coordinateRulerPoints = [];
+        coordinateRulerDistanceMeters = 0;
+        coordinateRulerLineFeature = null;
+        coordinateRulerLabelFeature = null;
+        if (coordinateRulerButton) {
+            coordinateRulerButton.disabled = false;
+            coordinateRulerButton.setAttribute("aria-pressed", "false");
+            coordinateRulerButton.textContent = "Ukur jarak dari pin";
+        }
+        if (coordinateRulerLayer) coordinateRulerLayer.getSource().clear();
+        focusMapOnCoordinates(latitude, longitude);
+        coordinateSearchMessage.textContent = `Lokasi ditemukan: ${latitude}, ${longitude} (radius ${COORDINATE_SEARCH_RADIUS_METERS} m)`;
+        coordinateSearchMessage.style.color = "#166534";
+    });
+}
  
 if (search) {
     search.addEventListener("input", function () {
