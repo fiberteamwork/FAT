@@ -151,7 +151,12 @@ td video {
     position: absolute;
     right: 0;
     top: 0;
-    display: contents;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    background: transparent !important;
+    box-shadow: none;
+    padding: 0 !important;
 }
 #bottom-right-container {
     position: absolute;
@@ -220,11 +225,11 @@ td video {
 
 .ol-zoom {
 	position: relative;
-    float: left;
+    float: none;
     top: unset;
     left: unset;
     margin-top: 8px;
-    margin-left: 8px;
+    margin-right: 8px;
 }
 
 
@@ -352,7 +357,7 @@ td video {
     top: unset;
     right: 0;
     bottom: unset!important;
-    margin-top: 8px;
+    margin-top: 4.5em;
     margin-right: 8px;
 	padding: 3px;
 	background-color: rgba(255,255,255,.4)!important;
