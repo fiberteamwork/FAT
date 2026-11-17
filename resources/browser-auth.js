@@ -29,11 +29,11 @@
             'layers/surabaya_2.js',
             'styles/SIDOARJO_1_style.js',
             'styles/surabaya_2_style.js',
-            'layers/layers.js',
+            'layers/layers.js?v=20261117.17',
             'resources/Autolinker.min.js',
             'resources/qgis2web.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'resources/customer-map.js?v=20261117.16'
+            'resources/customer-map.js?v=20261117.17'
         ];
 
         const loadingMessage = byId('map-loading-message');
