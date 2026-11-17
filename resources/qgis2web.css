@@ -34,9 +34,12 @@ html, body {
     display: block;
     font-size: 40px;
     line-height: 1;
+    touch-action: none;
     transform-origin: center bottom;
     animation: user-location-bounce 900ms ease-in-out infinite;
     filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .35));
+    pointer-events: auto;
+    cursor: grab;
 }
 
 .geolocate-button-icon {
