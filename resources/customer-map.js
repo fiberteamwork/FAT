@@ -5237,9 +5237,11 @@ async function xlsxDataSetsFromBuffer(buf) {
         const targetNames = sheetNames.filter(name => ['FAT', 'FDT'].includes(String(name).trim().toUpperCase()));
         const selectedNames = targetNames.length > 0 ? targetNames : sheetNames.slice(0, 1);
         const datasets = selectedNames.map(sheetName => {
-            const rows = wb.sheets[sheetName];
-            if (!rows) throw new Error(`Sheet "${sheetName}" tidak dapat dibaca.`);
-            return { sheetName, rows: XLSXLite.sheetToObjects(rows) };
+            const sheetRows = wb.sheets[sheetName];
+            if (!sheetRows) throw new Error(`Sheet "${sheetName}" tidak dapat dibaca.`);
+            const rows = XLSXLite.sheetToObjects(sheetRows);
+            wb.sheets[sheetName] = null;
+            return { sheetName, rows };
         });
         console.log('[CUSTOMER_MAP] XLSX sheets:', sheetNames.join(', '), '-> memakai', datasets.map(data => `"${data.sheetName}" (${data.rows.length} rows)`).join(', '));
         return datasets;
@@ -5326,7 +5328,6 @@ async function loadData(input = null) {
 
         await showLoadingMessage('Menyiapkan indeks wilayah...');
         try { buildWardIndex(); } catch(e){ console.warn('buildWardIndex failed (pre-fetch)', e); }
-        try { buildWardPolygonIndex(); } catch(e){ console.warn('buildWardPolygonIndex failed (pre-fetch)', e); }
         try { buildCityBoundaryIndex(); } catch(e){ console.warn('buildCityBoundaryIndex failed (pre-fetch)', e); }
 
         // Remove any stale customer layers before loading fresh data
@@ -5351,6 +5352,7 @@ async function loadData(input = null) {
             rows = parseCSV(String(input));
         }
         if (!datasets) datasets = [{ sheetName: 'FAT', rows }];
+        rows = null;
 
         console.log('[CUSTOMER_MAP] loadData start, rows=', datasets.map(data => `${data.sheetName}=${data.rows.length}`).join(', '));
         // Faster initial render: show a small immediate subset while full CSV is parsed in the background
@@ -5377,13 +5379,15 @@ async function loadData(input = null) {
         console.log('[CUSTOMER_MAP] loadData parsed customers count=', customers.length, 'parseMs=', Math.round(t1 - t0));
         siteValuesCache.clear();
         await showLoadingMessage('Menyiapkan tampilan peta...');
-        customers = deduplicateCustomerMarkers(customers);
 
         if (customers.length === 0) {
             console.warn('[CUSTOMER_MAP] loadData: tidak ada baris valid diparse, mencoba fallback parse');
             customers = deduplicateCustomerMarkers(datasets.flatMap(dataset => fallbackParseCustomerRows(dataset.rows)));
             console.log('[CUSTOMER_MAP] loadData fallback customers count=', customers.length);
+        } else {
+            customers = deduplicateCustomerMarkers(customers);
         }
+        datasets.forEach(dataset => { dataset.rows = null; });
 
         const filterStart = performance.now();
         try { updateFilters(); } catch (e) { console.error('[CUSTOMER_MAP] updateFilters gagal', e); }
