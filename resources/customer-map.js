@@ -115,12 +115,12 @@ const STATUS_CONFIG = {
 };
 
 const PORT_STATUS_CONFIG = {
-    full: { label: "Port Full🔴", color: "#ef4444" },
-    available: { label: "Port Available🟢", color: "#22c55e" },
+    full: { label: "Port FAT Full🔴", color: "#ef4444" },
+    available: { label: "Port FAT Available🟢", color: "#22c55e" },
     noData: { label: "Belum Ada Data🟤", color: "#8b5e3c" },
     needCheck: { label: "Need Check Input FAT🟠", color: "#f97316" },
     needUpdateSystem: { label: "Need Update System & Spliter FAT 🔵", color: "#3b82f6" },
-    unavailable: { label: "Port Unavailable⚫", color: "#111827" },
+    unavailable: { label: "Port FAT Unavailable⚫", color: "#111827" },
     odcAvailable: { label: "Port ODC Available📗", color: "#16a34a" },
     odcFull: { label: "Port ODC Full📕", color: "#dc2626" },
     partial: { label: "Partial🟡", color: "#f59e0b" },
