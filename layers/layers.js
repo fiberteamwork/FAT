@@ -18,6 +18,8 @@ var jsonSource_SIDOARJO_1 = new ol.source.Vector({
     attributions: ' ',
 });
 jsonSource_SIDOARJO_1.addFeatures(features_SIDOARJO_1);
+features_SIDOARJO_1 = null;
+json_SIDOARJO_1 = null;
 var lyr_SIDOARJO_1 = new ol.layer.Vector({
                 declutter: false,
                 source:jsonSource_SIDOARJO_1, 
@@ -33,6 +35,8 @@ var jsonSource_surabaya_2 = new ol.source.Vector({
     attributions: ' ',
 });
 jsonSource_surabaya_2.addFeatures(features_surabaya_2);
+features_surabaya_2 = null;
+json_surabaya_2 = null;
 var lyr_surabaya_2 = new ol.layer.Vector({
                 declutter: false,
                 source:jsonSource_surabaya_2, 
@@ -49,6 +53,8 @@ try {
         var features_Denpasar_1 = format_Denpasar_1.readFeatures(json_Denpasar_1, {dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857'});
         var jsonSource_Denpasar_1 = new ol.source.Vector({ attributions: ' ', });
         jsonSource_Denpasar_1.addFeatures(features_Denpasar_1);
+        features_Denpasar_1 = null;
+        json_Denpasar_1 = null;
         // style_Denpasar_1 may not exist; omit style if undefined
         var lyr_Denpasar_1 = new ol.layer.Vector({
             declutter: false,
