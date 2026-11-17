@@ -4175,7 +4175,7 @@ if (coordinateRulerButton) {
                 coordinateRulerLabelFeature = null;
                 coordinateSearchMessage.textContent = "Pengukuran selesai tanpa titik tujuan.";
             }
-            coordinateSearchMessage.style.color = coordinateRulerPoints.length > 1 ? "#166534" : "#64748b";
+            coordinateSearchMessage.style.color = coordinateRulerPoints.length > 1 ? "#6b0606" : "#64748b";
         }
     });
 
@@ -4196,7 +4196,7 @@ if (coordinateRulerButton) {
         }));
         coordinateSearchMessage.textContent =
             `Total jarak: ${formatCoordinateRulerDistance(coordinateRulerDistanceMeters)}. Klik titik lain atau Selesai mengukur.`;
-        coordinateSearchMessage.style.color = "#166534";
+        coordinateSearchMessage.style.color = "#6b0606";
     });
 
     map.on("pointermove", event => {
@@ -4231,8 +4231,8 @@ if (coordinateSearchForm && coordinateSearchInput && coordinateSearchMessage) {
         }
         if (coordinateRulerLayer) coordinateRulerLayer.getSource().clear();
         focusMapOnCoordinates(latitude, longitude);
-        coordinateSearchMessage.textContent = `Lokasi ditemukan: ${latitude}, ${longitude} (radius ${COORDINATE_SEARCH_RADIUS_METERS} m)`;
-        coordinateSearchMessage.style.color = "#166534";
+        coordinateSearchMessage.textContent = `Lokasi: ${latitude}, ${longitude} (radius ${COORDINATE_SEARCH_RADIUS_METERS} m)`;
+        coordinateSearchMessage.style.color = "#5f1105";
     });
 }
  
