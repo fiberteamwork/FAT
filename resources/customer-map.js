@@ -4190,6 +4190,22 @@ if (coordinateRulerButton) {
     });
 }
 
+if (coordinateSearchInput && coordinateRulerButton) {
+    coordinateSearchInput.addEventListener("input", () => {
+        coordinateSearchCoordinates = null;
+        coordinateRulerActive = false;
+        coordinateRulerButton.hidden = true;
+        coordinateRulerButton.disabled = true;
+        coordinateRulerButton.setAttribute("aria-pressed", "false");
+        coordinateRulerButton.textContent = "Ukur jarak dari pin";
+        coordinateRulerPoints = [];
+        coordinateRulerDistanceMeters = 0;
+        coordinateRulerLineFeature = null;
+        coordinateRulerLabelFeature = null;
+        if (coordinateRulerLayer) coordinateRulerLayer.getSource().clear();
+    });
+}
+
 if (coordinateSearchForm && coordinateSearchInput && coordinateSearchMessage) {
     coordinateSearchForm.addEventListener("submit", event => {
         event.preventDefault();
@@ -4211,6 +4227,7 @@ if (coordinateSearchForm && coordinateSearchInput && coordinateSearchMessage) {
         coordinateRulerLabelFeature = null;
         if (coordinateRulerButton) {
             coordinateRulerButton.disabled = false;
+            coordinateRulerButton.hidden = false;
             coordinateRulerButton.setAttribute("aria-pressed", "false");
             coordinateRulerButton.textContent = "Ukur jarak dari pin";
         }
