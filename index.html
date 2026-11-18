@@ -847,7 +847,7 @@ body:not(.auth-ready) #data-view-overlay {
     <div class="filter-group">
         <form id="coordinate-search-form">
             <label for="coordinate-search-input">Cari lokasi dengan koordinat</label>
-            <small style="display:block; color:#666;">Contoh: -7.2575, 112.7521</small>
+            <!--<small style="display:block; color:#666;">Contoh: -7.2575, 112.7521</small>-->
             <div style="display:flex; gap:6px; margin-bottom:4px;">
                 <input
                 type="text"
@@ -857,9 +857,9 @@ body:not(.auth-ready) #data-view-overlay {
                 style="flex:1; min-width:0; padding:8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;">
             <button type="submit" style="padding:8px 12px; border:0; border-radius:6px; background:#0d9103; color:white; cursor:pointer;">Cari</button>
         </div>
-        <small style="display:block; color:#666;">Klik tombol ukur, lalu klik beberapa titik pada peta untuk membuat belokan.</small>
-        <button id="coordinate-ruler-button" type="button" aria-pressed="false" disabled style="width:100%; padding:8px; border:1px solid #94a3b8; border-radius:6px; background:#1e76cf; color:#ffffff; cursor:pointer;"><b>Ukur jarak dari pin</b></button>
-        <p id="coordinate-search-message" role="status" aria-live="polite" style="margin:4px 0 8px; font-size:12px;"></p>
+        <!--<small style="display:block; color:#666; ">Klik tombol ukur, lalu klik beberapa titik pada peta untuk membuat belokan.</small>-->
+        <button id="coordinate-ruler-button" type="button" aria-pressed="false" disabled hidden style="width:100%; padding:8px; border:1px solid #94a3b8; border-radius:6px; background:#1e76cf; color:#ffffff; cursor:pointer;"><b>Ukur jarak dari pin</b></button>
+        <b><p id="coordinate-search-message" role="status" aria-live="polite" style="margin:4px 0 8px; font-size:12px;"></p></b>
     </form>
     <label>Cari FAT/ODP</label>
         <input
@@ -987,7 +987,7 @@ body:not(.auth-ready) #data-view-overlay {
         </div>
         <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script defer src="./resources/supabase-config.js?v=20261012.3"></script>
-        <script defer src="./resources/browser-auth.js?v=20261117.18"></script>
+        <script defer src="./resources/browser-auth.js?v=20261117.19"></script>
         
     </body>
 </html>
